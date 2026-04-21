@@ -1,23 +1,30 @@
-# --- Original Dependencies ---
-SpeechRecognition==3.10.1
-pyttsx3==2.90
-scikit-learn==1.4.0
-spacy==3.7.2
-numpy==1.26.4
-transformers==4.38.0
-torch==2.2.0
-google-generativeai==0.4.0
+# Rehbar Python Bridge -- Requirements
+# pip install -r requirements.txt
 
-# --- Voice & Audio Hardware ---
+# ── Web server (Flask REST bridge) ────────────────────────────────────────────
+flask==3.0.3
+werkzeug==3.0.3
+
+# ── Speech recognition ────────────────────────────────────────────────────────
+SpeechRecognition==3.10.1
 pyaudio==0.2.14
 
-# --- Improved Online TTS (Neural) ---
+# ── Vosk offline STT (optional but recommended) ───────────────────────────────
+# After install, download the model:
+#   https://alphacephei.com/vosk/models  ->  vosk-model-small-en-us-0.15.zip
+#   Unzip to: %APPDATA%\RAHBAR\vosk-model-small-en-us-0.15\
+vosk==0.3.45
+sounddevice==0.4.6
+
+# ── Intent classification ─────────────────────────────────────────────────────
+scikit-learn>=1.4.0
+numpy>=1.26.0
+joblib>=1.3.2
+
+# ── TTS ───────────────────────────────────────────────────────────────────────
+pyttsx3==2.90
 edge-tts==6.1.9
 pygame==2.5.2
 
-# --- Offline Speech Recognition Fallback ---
-pocketsphinx==5.0.3
-
-
-# after all this also runn
-# pip install https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
+# ── Gemini (stub -- uncomment and wire when ready) ────────────────────────────
+# google-generativeai>=0.4.0
