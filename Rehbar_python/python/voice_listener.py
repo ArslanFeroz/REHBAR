@@ -128,5 +128,6 @@ class VoiceListener:
 
 
 if __name__ == '__main__':
+
     vl = VoiceListener()
     print(vl.listen())

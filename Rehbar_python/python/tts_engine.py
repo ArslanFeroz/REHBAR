@@ -1,55 +1,65 @@
 """
-tts_engine.py  --  Rehbar TTS Engine
+tts_engine_fixed.py  --  Rehbar TTS Engine (diagnostic + more reliable online mode)
 
-Fixes vs original:
-  1. Absolute temp path  -- speech_temp.mp3 was relative; pygame couldn't
-     find it when the working directory wasn't exactly right.
-     Fix: tempfile.gettempdir() always gives an absolute writable path.
-
-  2. pyttsx3 per-thread init  -- init() was called on the main thread but
-     runAndWait() was called on the tts_loop daemon thread. On Windows,
-     SAPI5 COM objects are apartment-threaded and CANNOT cross threads.
-     This caused completely silent failures.
-     Fix: init pyttsx3 inside _speak_offline() on the calling thread.
-
-  3. Persistent asyncio loop  -- asyncio.run() creates+destroys a loop each
-     call. edge_tts uses aiohttp which caches connectors tied to the loop;
-     on the second call it raises 'Event loop is closed'.
-     Fix: one persistent loop, reused via loop.run_until_complete().
-
-  4. Connectivity cached  -- is_connected() socket call removed from the
-     hot path. Checked once at init, refreshed every 30s in background.
+Main fixes:
+1. Connectivity check no longer depends only on raw socket to 8.8.8.8:53
+   - that can fail on some networks/firewalls even when normal internet works
+2. Better error logging so you can see WHY it fell back
+3. Event loop is created and used safely with a lock
+4. Temporary mp3 filename is unique per call
+5. edge-tts failures are separated from playback failures
 """
 
 import asyncio
+import contextlib
 import os
-import socket
 import tempfile
 import threading
 import time
+import uuid
+from pathlib import Path
 
 import pygame
 import edge_tts
 
-VOICE    = 'en-US-EmmaNeural'
-_TMP_MP3 = os.path.join(tempfile.gettempdir(), 'rehbar_speech.mp3')
+VOICE = 'en-GB-ThomasNeural'
 
-_online      = False
+_online = False
 _online_lock = threading.Lock()
 
+
 def _check_conn() -> bool:
-    try:
-        socket.create_connection(('8.8.8.8', 53), timeout=2)
-        return True
-    except OSError:
-        return False
+    """
+    More practical connectivity test for edge-tts:
+    try opening a TCP connection to Microsoft's Edge TTS host.
+    """
+    import socket
+    targets = [
+        ('api.msedgeservices.com', 443),
+        ('www.microsoft.com', 443),
+        ('8.8.8.8', 53),
+    ]
+
+    for host, port in targets:
+        try:
+            with socket.create_connection((host, port), timeout=3):
+                return True
+        except OSError:
+            continue
+    return False
+
 
 def _conn_monitor():
     global _online
     while True:
-        time.sleep(30)
-        with _online_lock:
-            _online = _check_conn()
+        try:
+            status = _check_conn()
+            with _online_lock:
+                _online = status
+        except Exception as e:
+            print(f'[TTS] Connectivity monitor error: {e}')
+        time.sleep(15)
+
 
 def _is_online() -> bool:
     with _online_lock:
@@ -57,69 +67,109 @@ def _is_online() -> bool:
 
 
 class TTSEngine:
-
     def __init__(self):
         if not pygame.mixer.get_init():
             pygame.mixer.init()
 
-        # Persistent event loop for edge-tts -- avoids aiohttp 'loop closed' errors
         self._loop = asyncio.new_event_loop()
+        self._loop_lock = threading.Lock()
 
         global _online
         _online = _check_conn()
-        threading.Thread(
-            target=_conn_monitor, daemon=True, name='TTSConnMon').start()
+        threading.Thread(target=_conn_monitor, daemon=True, name='TTSConnMon').start()
 
         print(f'[TTS] Ready. Voice={VOICE!r}, online={_online}')
 
     def speak(self, text: str) -> None:
         if not text or not text.strip():
             return
+
+        text = text.strip()
         print(f'[TTS] Speaking: {text[:80]}{"..." if len(text) > 80 else ""}')
+        print(f'[TTS] Connectivity status before speak: {_is_online()}')
 
         if _is_online():
             try:
                 self._speak_online(text)
+                print('[TTS] Online speech succeeded.')
                 return
             except Exception as e:
-                print(f'[TTS] Online failed ({e}), falling back.')
+                print(f'[TTS] Online failed: {type(e).__name__}: {e}')
+                print('[TTS] Falling back to offline.')
 
         self._speak_offline(text)
 
     def _speak_online(self, text: str) -> None:
-        if os.path.exists(_TMP_MP3):
-            try: os.remove(_TMP_MP3)
-            except Exception: pass
+        tmp_path = Path(tempfile.gettempdir()) / f'rehbar_tts_{uuid.uuid4().hex}.mp3'
 
-        self._loop.run_until_complete(self._fetch(text, _TMP_MP3))
+        try:
+            with self._loop_lock:
+                self._loop.run_until_complete(self._fetch(text, str(tmp_path)))
 
-        if not os.path.exists(_TMP_MP3):
-            raise RuntimeError(f'TTS file not created at {_TMP_MP3}')
+            if not tmp_path.exists():
+                raise RuntimeError(f'TTS file not created at {tmp_path}')
 
-        pygame.mixer.music.load(_TMP_MP3)
-        pygame.mixer.music.play()
-        while pygame.mixer.music.get_busy():
-            time.sleep(0.05)
-        pygame.mixer.music.unload()
-        try: os.remove(_TMP_MP3)
-        except Exception: pass
+            if tmp_path.stat().st_size == 0:
+                raise RuntimeError(f'TTS file is empty at {tmp_path}')
+
+            try:
+                pygame.mixer.music.load(str(tmp_path))
+            except Exception as e:
+                raise RuntimeError(f'pygame load failed for {tmp_path}: {e}') from e
+
+            pygame.mixer.music.play()
+            while pygame.mixer.music.get_busy():
+                time.sleep(0.05)
+
+            with contextlib.suppress(Exception):
+                pygame.mixer.music.unload()
+
+        finally:
+            with contextlib.suppress(Exception):
+                if tmp_path.exists():
+                    tmp_path.unlink()
 
     @staticmethod
     async def _fetch(text: str, path: str) -> None:
+        print(f'[TTS] Fetching online audio -> {path}')
         communicator = edge_tts.Communicate(text, VOICE)
+
+        wrote_audio = False
         with open(path, 'wb') as f:
             async for chunk in communicator.stream():
-                if chunk['type'] == 'audio':
-                    f.write(chunk['data'])
+                chunk_type = chunk.get('type')
+                if chunk_type == 'audio':
+                    data = chunk.get('data', b'')
+                    if data:
+                        f.write(data)
+                        wrote_audio = True
+                elif chunk_type == 'WordBoundary':
+                    continue
+
+        if not wrote_audio:
+            raise RuntimeError('edge-tts stream returned no audio data')
 
     def _speak_offline(self, text: str) -> None:
-        """Init pyttsx3 HERE on the calling thread (Windows COM requirement)."""
         try:
             import pyttsx3
+
             engine = pyttsx3.init()
             engine.setProperty('rate', 160)
             engine.say(text)
             engine.runAndWait()
             engine.stop()
+            print('[TTS] Offline speech succeeded.')
         except Exception as e:
-            print(f'[TTS] Offline TTS failed: {e}')
+            print(f'[TTS] Offline TTS failed: {type(e).__name__}: {e}')
+
+    def close(self) -> None:
+        try:
+            with self._loop_lock:
+                self._loop.close()
+        except Exception as e:
+            print(f'[TTS] Loop close error: {e}')
+
+
+if __name__ == '__main__':
+    tts = TTSEngine()
+    tts.speak("Hello. This is a test of the online text to speech engine.")

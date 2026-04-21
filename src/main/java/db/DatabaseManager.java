@@ -10,11 +10,11 @@ import java.util.List;
 /**
  * DatabaseManager -- singleton SQLite data layer.
  *
- * Added vs original:
- *   - saveAlarm(), markAlarmTriggered(), getAllAlarms(), Alarm DTO
- *   - training_data table is now fully seeded (~500+ phrases, 9 intents)
- *     so the ML classifier has real data to train on instead of the
- *     ~60 hardcoded phrases in the old intent_classifier.py
+ * Integrated improvements:
+ *   - richer seed data for training_data
+ *   - voice / ASR-style variants added directly in Java seeding
+ *   - duplicate-safe inserts using INSERT OR IGNORE
+ *   - training phrases remain part of the core system, not a separate script
  */
 public class DatabaseManager {
 
@@ -44,11 +44,14 @@ public class DatabaseManager {
     // ── DTO ────────────────────────────────────────────────────────────────────
 
     public static class Alarm {
-        public final int           id;
-        public final String        label;
+        public final int id;
+        public final String label;
         public final LocalDateTime triggerTime;
+
         public Alarm(int id, String label, LocalDateTime triggerTime) {
-            this.id = id; this.label = label; this.triggerTime = triggerTime;
+            this.id = id;
+            this.label = label;
+            this.triggerTime = triggerTime;
         }
     }
 
@@ -151,10 +154,11 @@ public class DatabaseManager {
                         "alias TEXT UNIQUE NOT NULL, url TEXT NOT NULL);",
                 "CREATE TABLE IF NOT EXISTS training_data (" +
                         "id INTEGER PRIMARY KEY AUTOINCREMENT, " +
-                        "phrase TEXT NOT NULL, intent TEXT NOT NULL);",
+                        "phrase TEXT NOT NULL UNIQUE, intent TEXT NOT NULL);",
                 "CREATE TABLE IF NOT EXISTS settings (" +
                         "key TEXT PRIMARY KEY, value TEXT);"
         };
+
         try (Statement stmt = connection.createStatement()) {
             for (String sql : ddl) stmt.execute(sql);
             System.out.println("[DB] All tables initialised.");
@@ -167,8 +171,24 @@ public class DatabaseManager {
     private void populateTables() {
         String username = System.getProperty("user.name");
 
+        try {
+            connection.setAutoCommit(false);
+
+            seedStaticData(username);
+            seedTrainingData();
+
+            connection.commit();
+            System.out.println("[DB] Default data populated.");
+        } catch (SQLException e) {
+            try { connection.rollback(); } catch (SQLException ex) { ex.printStackTrace(); }
+            e.printStackTrace();
+        } finally {
+            try { connection.setAutoCommit(true); } catch (SQLException e) { e.printStackTrace(); }
+        }
+    }
+
+    private void seedStaticData(String username) throws SQLException {
         String[] staticData = {
-                // App registry
                 "INSERT OR IGNORE INTO app_registry (alias,path) VALUES " +
                         "('chrome','C:/Program Files/Google/Chrome/Application/chrome.exe')," +
                         "('notepad','C:/Windows/System32/notepad.exe')," +
@@ -181,7 +201,6 @@ public class DatabaseManager {
                         "('taskmgr','C:/Windows/System32/taskmgr.exe')," +
                         "('cmd','C:/Windows/System32/cmd.exe');",
 
-                // Website registry
                 "INSERT OR IGNORE INTO website_registry (alias,url) VALUES " +
                         "('youtube','https://youtube.com')," +
                         "('google','https://google.com')," +
@@ -196,261 +215,250 @@ public class DatabaseManager {
                         "('chatgpt','https://chat.openai.com')," +
                         "('netflix','https://netflix.com');",
 
-                // Settings
                 "INSERT OR IGNORE INTO settings (key,value) VALUES " +
                         "('voice_speed','160'),('theme','dark'),('ai_enabled','false');"
         };
 
-        // ── Training data: ~500+ phrases, 9 intents ──────────────────────────
-        String[] trainingData = {
+        try (Statement stmt = connection.createStatement()) {
+            for (String sql : staticData) stmt.executeUpdate(sql);
+        }
+    }
 
-                // OPEN_APP
-                "INSERT OR IGNORE INTO training_data (phrase,intent) VALUES " +
-                        "('open chrome','OPEN_APP'),('launch firefox','OPEN_APP')," +
-                        "('start spotify','OPEN_APP'),('run notepad','OPEN_APP')," +
-                        "('execute vlc','OPEN_APP'),('fire up the browser','OPEN_APP')," +
-                        "('can you open excel','OPEN_APP'),('please start word','OPEN_APP')," +
-                        "('open the terminal','OPEN_APP'),('launch steam','OPEN_APP')," +
-                        "('start discord','OPEN_APP'),('boot up vscode','OPEN_APP')," +
-                        "('open paint','OPEN_APP'),('launch photoshop','OPEN_APP')," +
-                        "('start the file explorer','OPEN_APP'),('run the calculator','OPEN_APP')," +
-                        "('open my music app','OPEN_APP'),('launch windows media player','OPEN_APP')," +
-                        "('open the task manager','OPEN_APP'),('open control panel','OPEN_APP')," +
-                        "('launch android studio','OPEN_APP'),('start intellij','OPEN_APP')," +
-                        "('open spotify','OPEN_APP'),('run the browser','OPEN_APP')," +
-                        "('open my pdf reader','OPEN_APP'),('please run discord','OPEN_APP')," +
-                        "('start firefox for me','OPEN_APP'),('open the command prompt','OPEN_APP')," +
-                        "('start vlc media player','OPEN_APP'),('can you launch chrome','OPEN_APP')," +
-                        "('open a new terminal','OPEN_APP'),('launch telegram','OPEN_APP')," +
-                        "('start skype','OPEN_APP'),('launch opera','OPEN_APP')," +
-                        "('bring up chrome','OPEN_APP'),('pull up notepad','OPEN_APP')," +
-                        "('open edge browser','OPEN_APP'),('get spotify running','OPEN_APP')," +
-                        "('open regedit','OPEN_APP'),('launch cmd','OPEN_APP')," +
-                        "('start the program','OPEN_APP'),('initialize the application','OPEN_APP')," +
-                        "('open my application','OPEN_APP'),('run my code editor','OPEN_APP')," +
-                        "('start up excel','OPEN_APP'),('open zoom','OPEN_APP');",
+    private void insertTrainingPhrase(PreparedStatement ps, String phrase, String intent) throws SQLException {
+        ps.setString(1, phrase.trim().toLowerCase());
+        ps.setString(2, intent);
+        ps.addBatch();
+    }
 
-                // CLOSE_APP
-                "INSERT OR IGNORE INTO training_data (phrase,intent) VALUES " +
-                        "('close chrome','CLOSE_APP'),('quit firefox','CLOSE_APP')," +
-                        "('exit spotify','CLOSE_APP'),('stop vlc','CLOSE_APP')," +
-                        "('kill the process','CLOSE_APP'),('shut down notepad','CLOSE_APP')," +
-                        "('terminate discord','CLOSE_APP'),('end the program','CLOSE_APP')," +
-                        "('force quit excel','CLOSE_APP'),('close the browser','CLOSE_APP')," +
-                        "('stop the music player','CLOSE_APP'),('exit out of steam','CLOSE_APP')," +
-                        "('quit word','CLOSE_APP'),('shut down the terminal','CLOSE_APP')," +
-                        "('close cmd','CLOSE_APP'),('kill chrome','CLOSE_APP')," +
-                        "('stop microsoft teams','CLOSE_APP'),('close the game','CLOSE_APP')," +
-                        "('exit zoom','CLOSE_APP'),('terminate the app','CLOSE_APP')," +
-                        "('shut down outlook','CLOSE_APP'),('close powerpoint','CLOSE_APP')," +
-                        "('quit excel','CLOSE_APP'),('kill the terminal','CLOSE_APP')," +
-                        "('stop discord','CLOSE_APP'),('quit the browser','CLOSE_APP')," +
-                        "('shut down explorer','CLOSE_APP'),('exit the program','CLOSE_APP')," +
-                        "('terminate firefox','CLOSE_APP'),('close edge','CLOSE_APP')," +
-                        "('force close the window','CLOSE_APP'),('shut it down','CLOSE_APP')," +
-                        "('kill signal','CLOSE_APP'),('close telegram','CLOSE_APP')," +
-                        "('stop spotify','CLOSE_APP'),('end this app','CLOSE_APP');",
+    private void seedTrainingData() throws SQLException {
+        String sql = "INSERT OR IGNORE INTO training_data (phrase,intent) VALUES (?,?)";
 
-                // WEB_SEARCH
-                "INSERT OR IGNORE INTO training_data (phrase,intent) VALUES " +
-                        "('search for python tutorials','WEB_SEARCH')," +
-                        "('google the weather today','WEB_SEARCH')," +
-                        "('look up java documentation','WEB_SEARCH')," +
-                        "('search on the web for news','WEB_SEARCH')," +
-                        "('find information about space','WEB_SEARCH')," +
-                        "('who is the president','WEB_SEARCH')," +
-                        "('how to cook pasta','WEB_SEARCH')," +
-                        "('what is machine learning','WEB_SEARCH')," +
-                        "('google how to fix windows error','WEB_SEARCH')," +
-                        "('look up the recipe for pizza','WEB_SEARCH')," +
-                        "('search for cheap flights','WEB_SEARCH')," +
-                        "('what is the capital of france','WEB_SEARCH')," +
-                        "('look up python syntax','WEB_SEARCH')," +
-                        "('how to learn programming','WEB_SEARCH')," +
-                        "('what is quantum computing','WEB_SEARCH')," +
-                        "('how to meditate','WEB_SEARCH')," +
-                        "('what is the fastest car in the world','WEB_SEARCH')," +
-                        "('how to install ubuntu','WEB_SEARCH')," +
-                        "('what is dark matter','WEB_SEARCH')," +
-                        "('how to learn guitar','WEB_SEARCH')," +
-                        "('what is blockchain','WEB_SEARCH')," +
-                        "('how to improve memory','WEB_SEARCH')," +
-                        "('how to make a website','WEB_SEARCH')," +
-                        "('search the internet','WEB_SEARCH')," +
-                        "('browse for information','WEB_SEARCH')," +
-                        "('research about artificial intelligence','WEB_SEARCH')," +
-                        "('find news articles','WEB_SEARCH')," +
-                        "('google nearby restaurants','WEB_SEARCH')," +
-                        "('look up stock prices today','WEB_SEARCH')," +
-                        "('find the latest tech news','WEB_SEARCH');",
-
-                // CREATE_FILE
-                "INSERT OR IGNORE INTO training_data (phrase,intent) VALUES " +
-                        "('create folder named projects','CREATE_FILE')," +
-                        "('make a new directory','CREATE_FILE')," +
-                        "('new folder called notes','CREATE_FILE')," +
-                        "('generate a file named test','CREATE_FILE')," +
-                        "('create a new text file','CREATE_FILE')," +
-                        "('make directory backup','CREATE_FILE')," +
-                        "('create a folder called work','CREATE_FILE')," +
-                        "('make a new file named resume','CREATE_FILE')," +
-                        "('create documents folder','CREATE_FILE')," +
-                        "('make a folder for my photos','CREATE_FILE')," +
-                        "('create a file called todo','CREATE_FILE')," +
-                        "('make a new txt file','CREATE_FILE')," +
-                        "('create a folder on the desktop','CREATE_FILE')," +
-                        "('make a new project folder','CREATE_FILE')," +
-                        "('create notes folder','CREATE_FILE')," +
-                        "('make a new empty file','CREATE_FILE')," +
-                        "('create a text document','CREATE_FILE')," +
-                        "('make a new directory named configs','CREATE_FILE')," +
-                        "('create a file named readme','CREATE_FILE')," +
-                        "('new folder please','CREATE_FILE')," +
-                        "('create me a folder','CREATE_FILE')," +
-                        "('make a text file','CREATE_FILE')," +
-                        "('create output folder','CREATE_FILE')," +
-                        "('make a backup folder','CREATE_FILE')," +
-                        "('create a folder called test','CREATE_FILE')," +
-                        "('make a new word document','CREATE_FILE')," +
-                        "('generate new file now','CREATE_FILE');",
-
-                // DELETE_FILE
-                "INSERT OR IGNORE INTO training_data (phrase,intent) VALUES " +
-                        "('delete the file homework','DELETE_FILE')," +
-                        "('remove folder old stuff','DELETE_FILE')," +
-                        "('erase file temp','DELETE_FILE')," +
-                        "('trash this folder','DELETE_FILE')," +
-                        "('delete my resume','DELETE_FILE')," +
-                        "('remove the directory data','DELETE_FILE')," +
-                        "('get rid of the file report','DELETE_FILE')," +
-                        "('wipe the folder backup','DELETE_FILE')," +
-                        "('delete the downloads folder','DELETE_FILE')," +
-                        "('remove file called notes','DELETE_FILE')," +
-                        "('erase the directory logs','DELETE_FILE')," +
-                        "('delete folder named archive','DELETE_FILE')," +
-                        "('remove old documents','DELETE_FILE')," +
-                        "('erase that file','DELETE_FILE')," +
-                        "('delete temp folder','DELETE_FILE')," +
-                        "('remove the log file','DELETE_FILE')," +
-                        "('clean up old files','DELETE_FILE')," +
-                        "('delete old backups','DELETE_FILE')," +
-                        "('permanently delete this file','DELETE_FILE')," +
-                        "('throw away this folder','DELETE_FILE')," +
-                        "('discard the old directory','DELETE_FILE');",
-
-                // RENAME_FILE
-                "INSERT OR IGNORE INTO training_data (phrase,intent) VALUES " +
-                        "('rename file report to final','RENAME_FILE')," +
-                        "('change name of folder to work','RENAME_FILE')," +
-                        "('rename this to backup','RENAME_FILE')," +
-                        "('modify file name to notes','RENAME_FILE')," +
-                        "('rename my resume to cv','RENAME_FILE')," +
-                        "('rename file called old to new','RENAME_FILE')," +
-                        "('change file test to main','RENAME_FILE')," +
-                        "('rename this folder to assets','RENAME_FILE')," +
-                        "('rename draft to final version','RENAME_FILE')," +
-                        "('change name of file to readme','RENAME_FILE')," +
-                        "('rename file temp to cache','RENAME_FILE')," +
-                        "('rename this file please','RENAME_FILE')," +
-                        "('update the file name','RENAME_FILE')," +
-                        "('give this file a new name','RENAME_FILE')," +
-                        "('relabel this folder','RENAME_FILE')," +
-                        "('rename log file to archive','RENAME_FILE')," +
-                        "('change that file name','RENAME_FILE');",
-
-                // OPEN_SITE
-                "INSERT OR IGNORE INTO training_data (phrase,intent) VALUES " +
-                        "('open youtube','OPEN_SITE'),('go to github','OPEN_SITE')," +
-                        "('navigate to gmail','OPEN_SITE'),('visit stackoverflow','OPEN_SITE')," +
-                        "('open facebook','OPEN_SITE'),('navigate to twitter','OPEN_SITE')," +
-                        "('visit reddit','OPEN_SITE'),('go to google','OPEN_SITE')," +
-                        "('open amazon','OPEN_SITE'),('navigate to netflix','OPEN_SITE')," +
-                        "('visit linkedin','OPEN_SITE'),('open instagram','OPEN_SITE')," +
-                        "('go to wikipedia','OPEN_SITE'),('open twitch','OPEN_SITE')," +
-                        "('go to chatgpt','OPEN_SITE'),('open spotify web','OPEN_SITE')," +
-                        "('go to google docs','OPEN_SITE'),('open google sheets','OPEN_SITE')," +
-                        "('take me to youtube','OPEN_SITE'),('launch the website','OPEN_SITE')," +
-                        "('browse to google','OPEN_SITE'),('open the site','OPEN_SITE')," +
-                        "('open google maps','OPEN_SITE'),('navigate to microsoft','OPEN_SITE')," +
-                        "('visit apple website','OPEN_SITE'),('go to reddit','OPEN_SITE')," +
-                        "('navigate to hacker news','OPEN_SITE'),('open dev to','OPEN_SITE');",
-
-                // SET_ALARM
-                "INSERT OR IGNORE INTO training_data (phrase,intent) VALUES " +
-                        "('set alarm for 7 am','SET_ALARM')," +
-                        "('remind me at 3pm to drink water','SET_ALARM')," +
-                        "('wake me up at 6 o clock','SET_ALARM')," +
-                        "('set a timer for 10 minutes','SET_ALARM')," +
-                        "('new alarm for 8 30','SET_ALARM')," +
-                        "('wake me up in 2 hours','SET_ALARM')," +
-                        "('set alarm for 5 30 am','SET_ALARM')," +
-                        "('remind me in 30 minutes','SET_ALARM')," +
-                        "('alarm at 9 pm','SET_ALARM')," +
-                        "('remind me to take medicine at noon','SET_ALARM')," +
-                        "('set morning alarm','SET_ALARM')," +
-                        "('set timer for 1 hour','SET_ALARM')," +
-                        "('remind me about the meeting at 2pm','SET_ALARM')," +
-                        "('new alarm at midnight','SET_ALARM')," +
-                        "('set a 15 minute timer','SET_ALARM')," +
-                        "('remind me to call mom at 4pm','SET_ALARM')," +
-                        "('timer for 20 minutes please','SET_ALARM')," +
-                        "('set alarm for 7 30 am','SET_ALARM')," +
-                        "('wake me up at 8','SET_ALARM')," +
-                        "('set countdown timer','SET_ALARM')," +
-                        "('create an alarm for 8 am','SET_ALARM')," +
-                        "('set reminder for gym','SET_ALARM')," +
-                        "('alarm for tomorrow at 7','SET_ALARM')," +
-                        "('set a reminder at 6 pm','SET_ALARM')," +
-                        "('timer for 25 minutes','SET_ALARM');",
-
-                // SYSTEM_INFO
-                "INSERT OR IGNORE INTO training_data (phrase,intent) VALUES " +
-                        "('what time is it','SYSTEM_INFO')," +
-                        "('what is the date','SYSTEM_INFO')," +
-                        "('show battery level','SYSTEM_INFO')," +
-                        "('how much ram is used','SYSTEM_INFO')," +
-                        "('current cpu usage','SYSTEM_INFO')," +
-                        "('tell me the time','SYSTEM_INFO')," +
-                        "('what day is it today','SYSTEM_INFO')," +
-                        "('check my battery','SYSTEM_INFO')," +
-                        "('what is the memory usage','SYSTEM_INFO')," +
-                        "('show me the date','SYSTEM_INFO')," +
-                        "('what is the cpu load','SYSTEM_INFO')," +
-                        "('check the time','SYSTEM_INFO')," +
-                        "('what is the battery percentage','SYSTEM_INFO')," +
-                        "('show system information','SYSTEM_INFO')," +
-                        "('what is the ram usage','SYSTEM_INFO')," +
-                        "('check disk space','SYSTEM_INFO')," +
-                        "('tell me the date','SYSTEM_INFO')," +
-                        "('show me battery status','SYSTEM_INFO')," +
-                        "('how much free ram do I have','SYSTEM_INFO')," +
-                        "('show cpu usage','SYSTEM_INFO')," +
-                        "('check my storage','SYSTEM_INFO')," +
-                        "('what is my battery level','SYSTEM_INFO')," +
-                        "('show running processes','SYSTEM_INFO')," +
-                        "('how is my system performing','SYSTEM_INFO')," +
-                        "('how much battery is left','SYSTEM_INFO')," +
-                        "('check the processor speed','SYSTEM_INFO')," +
-                        "('show me all system stats','SYSTEM_INFO');" ,
-
-                // UNKNOWN (teaches low-confidence fallback)
-                "INSERT OR IGNORE INTO training_data (phrase,intent) VALUES " +
-                        "('asdf','UNKNOWN'),('xyzzy','UNKNOWN'),('blah blah','UNKNOWN')," +
-                        "('test test test','UNKNOWN'),('random noise','UNKNOWN')," +
-                        "('um uh er','UNKNOWN'),('mhmm','UNKNOWN');"
+        String[] apps = {
+                "chrome", "notepad", "calculator", "spotify", "vlc", "discord", "vscode",
+                "explorer", "task manager", "cmd", "command prompt", "terminal",
+                "paint", "zoom", "steam", "firefox", "edge"
         };
 
-        try (Statement stmt = connection.createStatement()) {
-            connection.setAutoCommit(false);
-            for (String sql : staticData)   stmt.executeUpdate(sql);
-            for (String sql : trainingData) stmt.executeUpdate(sql);
-            connection.commit();
-            System.out.println("[DB] Default data populated.");
-        } catch (SQLException e) {
-            try { connection.rollback(); } catch (SQLException ex) { ex.printStackTrace(); }
-            e.printStackTrace();
-        } finally {
-            try { connection.setAutoCommit(true); } catch (SQLException e) { e.printStackTrace(); }
+        String[] sites = {
+                "youtube", "google", "github", "gmail", "stackoverflow", "reddit",
+                "twitter", "facebook", "wikipedia", "linkedin", "chatgpt", "netflix",
+                "google maps", "google docs", "google sheets"
+        };
+
+        String[] searchTopics = {
+                "python tutorials", "java documentation", "donald trump", "weather today",
+                "machine learning", "quantum computing", "cheap flights", "stock prices today",
+                "latest tech news", "who is the president of pakistan", "where is tokyo",
+                "how to cook pasta", "how to install ubuntu", "java streams", "black holes",
+                "artificial intelligence", "restaurants near me", "python decorators",
+                "space news", "news about tesla", "wikipedia"
+        };
+
+        String[] createTargets = {
+                "projects", "notes", "backup", "work", "resume", "documents", "photos",
+                "configs", "assets", "readme", "todo", "logs", "output"
+        };
+
+        String[] deleteTargets = {
+                "homework", "old stuff", "temp", "resume", "data", "backup", "downloads",
+                "notes", "archive", "log file", "old documents", "old backups"
+        };
+
+        String[] renameOld = {
+                "report", "resume", "old", "test", "draft", "temp", "log file", "folder", "notes"
+        };
+
+        String[] renameNew = {
+                "final", "cv", "new", "main", "final version", "cache", "archive", "assets", "readme"
+        };
+
+        String[] alarmPhrases = {
+                "set alarm for 7 am", "set alarm for 5 30 am", "alarm at 9 pm",
+                "new alarm for 8 30", "wake me up at 6 o clock", "wake me in 2 hours",
+                "set a timer for 10 minutes", "timer for 25 minutes",
+                "remind me at 3pm to drink water", "remind me in 30 minutes",
+                "alarm for tomorrow at 7", "set reminder for gym",
+                "set a reminder at 6 pm", "new alarm at midnight"
+        };
+
+        String[] systemInfoPhrases = {
+                "what time is it", "tell me the time", "check the time",
+                "what is the date", "show me the date", "what day is it today",
+                "show battery level", "check my battery", "what is the battery percentage",
+                "current cpu usage", "show cpu usage", "what is the cpu load",
+                "how much ram is used", "what is the memory usage", "how much free ram do i have",
+                "check disk space", "check my storage", "show system information",
+                "show running processes", "how is my system performing"
+        };
+
+        String[] chatPhrases = {
+                "hello", "hi", "hey", "good morning", "good evening",
+                "how are you", "what is your name", "who made you",
+                "thanks", "thank you", "okay", "cool", "alright"
+        };
+
+        String[] openVerbs = {"open", "launch", "start", "run", "fire up", "bring up"};
+        String[] closeVerbs = {"close", "quit", "exit", "stop", "terminate", "kill", "shut down"};
+        String[] siteVerbs = {"open", "go to", "visit", "navigate to", "take me to", "browse to"};
+        String[] searchVerbs = {"search for", "look up", "find information about", "google", "search the web for"};
+        String[] createVerbs = {"create", "make", "generate", "new"};
+        String[] deleteVerbs = {"delete", "remove", "erase", "trash", "wipe", "get rid of"};
+        String[] renameVerbs = {"rename", "change name of", "modify file name to", "relabel", "update the file name of"};
+
+        String[] fillers = {
+                "rehbar ", "hey rehbar ", "ok rehbar ", "okay rehbar ", "actually ", "well ", "i mean ", "so "
+        };
+
+        String[] noisyVariants = {
+                "cloze chrome", "close krom", "open chrom", "rehbar open krom",
+                "look up wikipidia", "serch for donald trump", "go too github",
+                "set an allarm for seven am", "wut time is it", "renaim my file to final",
+                "delite the bakup folder", "make new foulder", "cloze spotify"
+        };
+
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+
+            // Existing-style seed phrases, generated in a more scalable way
+            for (String app : apps) {
+                for (String verb : openVerbs) {
+                    insertTrainingPhrase(ps, verb + " " + app, "OPEN_APP");
+                }
+                for (String verb : closeVerbs) {
+                    insertTrainingPhrase(ps, verb + " " + app, "CLOSE_APP");
+                }
+            }
+
+            for (String site : sites) {
+                for (String verb : siteVerbs) {
+                    insertTrainingPhrase(ps, verb + " " + site, "OPEN_SITE");
+                }
+            }
+
+            for (String topic : searchTopics) {
+                for (String verb : searchVerbs) {
+                    insertTrainingPhrase(ps, verb + " " + topic, "WEB_SEARCH");
+                }
+            }
+
+            for (String target : createTargets) {
+                insertTrainingPhrase(ps, "create folder named " + target, "CREATE_FILE");
+                insertTrainingPhrase(ps, "create a folder called " + target, "CREATE_FILE");
+                insertTrainingPhrase(ps, "make a new directory " + target, "CREATE_FILE");
+                insertTrainingPhrase(ps, "create a file named " + target, "CREATE_FILE");
+                insertTrainingPhrase(ps, "make a new text file " + target, "CREATE_FILE");
+            }
+
+            for (String target : deleteTargets) {
+                insertTrainingPhrase(ps, "delete the file " + target, "DELETE_FILE");
+                insertTrainingPhrase(ps, "remove folder " + target, "DELETE_FILE");
+                insertTrainingPhrase(ps, "erase file " + target, "DELETE_FILE");
+                insertTrainingPhrase(ps, "delete old " + target, "DELETE_FILE");
+            }
+
+            for (int i = 0; i < Math.min(renameOld.length, renameNew.length); i++) {
+                insertTrainingPhrase(ps, "rename file " + renameOld[i] + " to " + renameNew[i], "RENAME_FILE");
+                insertTrainingPhrase(ps, "change name of file " + renameOld[i] + " to " + renameNew[i], "RENAME_FILE");
+                insertTrainingPhrase(ps, "rename " + renameOld[i] + " to " + renameNew[i], "RENAME_FILE");
+            }
+
+            for (String phrase : alarmPhrases) insertTrainingPhrase(ps, phrase, "SET_ALARM");
+            for (String phrase : systemInfoPhrases) insertTrainingPhrase(ps, phrase, "SYSTEM_INFO");
+
+            // Wake-word / filler variants for real voice usage
+            String[] commandish = {
+                    "open chrome", "close chrome", "go to github", "search for donald trump",
+                    "look up wikipedia", "set alarm for 7 am", "what time is it",
+                    "make a new folder called ai", "delete the backup folder", "rename my file to final report"
+            };
+            for (String base : commandish) {
+                for (String filler : fillers) {
+                    insertTrainingPhrase(ps, filler + base, inferIntent(base));
+                }
+            }
+
+            // Noisy voice / ASR-style examples
+            insertTrainingPhrase(ps, "look up wikipidia", "WEB_SEARCH");
+            insertTrainingPhrase(ps, "search for wikipidia", "WEB_SEARCH");
+            insertTrainingPhrase(ps, "look up wikipedia", "WEB_SEARCH");
+            insertTrainingPhrase(ps, "where is tokyo", "WEB_SEARCH");
+            insertTrainingPhrase(ps, "who is donald trump", "WEB_SEARCH");
+            insertTrainingPhrase(ps, "what is machine learning", "WEB_SEARCH");
+            insertTrainingPhrase(ps, "how to install python", "WEB_SEARCH");
+
+            insertTrainingPhrase(ps, "cloze chrome", "CLOSE_APP");
+            insertTrainingPhrase(ps, "cloze spotify", "CLOSE_APP");
+            insertTrainingPhrase(ps, "close krom", "CLOSE_APP");
+            insertTrainingPhrase(ps, "open chrom", "OPEN_APP");
+            insertTrainingPhrase(ps, "open krom", "OPEN_APP");
+            insertTrainingPhrase(ps, "rehbar open krom", "OPEN_APP");
+            insertTrainingPhrase(ps, "go too github", "OPEN_SITE");
+            insertTrainingPhrase(ps, "serch for donald trump", "WEB_SEARCH");
+            insertTrainingPhrase(ps, "set an allarm for seven am", "SET_ALARM");
+            insertTrainingPhrase(ps, "wut time is it", "SYSTEM_INFO");
+            insertTrainingPhrase(ps, "delite the bakup folder", "DELETE_FILE");
+            insertTrainingPhrase(ps, "renaim my file to final", "RENAME_FILE");
+            insertTrainingPhrase(ps, "make new foulder", "CREATE_FILE");
+
+            for (String phrase : noisyVariants) {
+                // Already inserted above in many cases, but INSERT OR IGNORE keeps this safe
+                if (phrase.contains("allarm") || phrase.contains("alarm")) {
+                    insertTrainingPhrase(ps, phrase, "SET_ALARM");
+                } else if (phrase.contains("wut time")) {
+                    insertTrainingPhrase(ps, phrase, "SYSTEM_INFO");
+                } else if (phrase.contains("wikipidia") || phrase.contains("serch")) {
+                    insertTrainingPhrase(ps, phrase, "WEB_SEARCH");
+                } else if (phrase.contains("delite")) {
+                    insertTrainingPhrase(ps, phrase, "DELETE_FILE");
+                } else if (phrase.contains("renaim")) {
+                    insertTrainingPhrase(ps, phrase, "RENAME_FILE");
+                } else if (phrase.contains("foulder")) {
+                    insertTrainingPhrase(ps, phrase, "CREATE_FILE");
+                } else if (phrase.startsWith("open") || phrase.contains("open krom") || phrase.contains("open chrom")) {
+                    insertTrainingPhrase(ps, phrase, "OPEN_APP");
+                } else if (phrase.startsWith("cloze") || phrase.startsWith("close")) {
+                    insertTrainingPhrase(ps, phrase, "CLOSE_APP");
+                } else if (phrase.contains("github")) {
+                    insertTrainingPhrase(ps, phrase, "OPEN_SITE");
+                }
+            }
+
+            // Small talk
+            for (String phrase : chatPhrases) {
+                insertTrainingPhrase(ps, phrase, "CHAT");
+            }
+
+            ps.executeBatch();
         }
+
+        System.out.println("[DB] training_data seeded / expanded.");
+    }
+
+    private String inferIntent(String text) {
+        String t = text.toLowerCase();
+        if (t.contains("alarm") || t.contains("timer") || t.contains("remind") || t.contains("wake me")) {
+            return "SET_ALARM";
+        }
+        if (t.contains("what time") || t.contains("battery") || t.contains("cpu") || t.contains("ram") || t.contains("date")) {
+            return "SYSTEM_INFO";
+        }
+        if (t.startsWith("open chrome") || t.startsWith("close chrome")) {
+            return t.startsWith("open") ? "OPEN_APP" : "CLOSE_APP";
+        }
+        if (t.contains("go to github")) {
+            return "OPEN_SITE";
+        }
+        if (t.contains("search for") || t.contains("look up") || t.contains("wikipedia")) {
+            return "WEB_SEARCH";
+        }
+        if (t.contains("make a new folder") || t.contains("create")) {
+            return "CREATE_FILE";
+        }
+        if (t.contains("delete")) {
+            return "DELETE_FILE";
+        }
+        if (t.contains("rename")) {
+            return "RENAME_FILE";
+        }
+        return "WEB_SEARCH";
     }
 }
