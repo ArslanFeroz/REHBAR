@@ -1,11 +1,16 @@
 """
-bridge_final.py  --  Rehbar Python bridge final
+bridge_gemini.py  --  Rehbar Python bridge with Gemini-backed AI mode
 
-Changes included:
-- uses voice_listener_final.py
-- uses intent_classifier_final.py
-- understands AI_ENABLE / AI_DISABLE
-- keeps your original bridge architecture
+Uses:
+- voice_listener.py
+- intent_classifier.py
+- tts_engine.py
+- chat_gemini.py
+
+Behavior:
+- AI_ENABLE / AI_DISABLE handled in Python
+- CHAT handled by Gemini
+- system commands forwarded to Java as before
 """
 
 import os
@@ -25,6 +30,7 @@ from flask import Flask, request, jsonify
 from voice_listener import VoiceListener
 from tts_engine import TTSEngine
 from intent_classifier import IntentClassifier
+from chat_gemini import GeminiChat
 
 HOST = '127.0.0.1'
 PORT = 5000
@@ -83,11 +89,6 @@ def speak():
     return jsonify({'status': 'queued'}), 200
 
 
-def handle_chat(text: str) -> str:
-    print(f'[CHAT stub] "{text}" -- Gemini not yet configured.')
-    return "I am still learning to chat. Please give me a command for now."
-
-
 def _strip_wake_word(text: str) -> str:
     text = re.sub(
         r'^\s*(rehbar|rabar|rebar|ribar|raybar|ray\s+bar|re\s+bar'
@@ -99,7 +100,9 @@ def _strip_wake_word(text: str) -> str:
     return text
 
 
-def voice_capture_loop(listener: VoiceListener, classifier: IntentClassifier) -> None:
+def voice_capture_loop(listener: VoiceListener,
+                       classifier: IntentClassifier,
+                       chat_backend: GeminiChat) -> None:
     print('[VoiceThread] Started.')
     while True:
         try:
@@ -118,7 +121,6 @@ def voice_capture_loop(listener: VoiceListener, classifier: IntentClassifier) ->
             intent = result['intent']
             print(f'[VoiceThread] Result: {result}')
 
-            # AI mode toggles are handled here in Python, not sent to Java
             if intent == 'AI_ENABLE':
                 try:
                     tts_queue.put_nowait('AI mode enabled.')
@@ -133,16 +135,18 @@ def voice_capture_loop(listener: VoiceListener, classifier: IntentClassifier) ->
                     print('[VoiceThread] WARN: tts_queue full.')
                 continue
 
-            # Chat handled entirely in Python
             if intent == 'CHAT':
-                reply = handle_chat(cleaned)
+                try:
+                    reply = chat_backend.reply(cleaned)
+                except Exception as e:
+                    print(f'[CHAT] Gemini error: {type(e).__name__}: {e}')
+                    reply = "I could not reach Gemini right now."
                 try:
                     tts_queue.put_nowait(reply)
                 except queue.Full:
                     print('[VoiceThread] WARN: tts_queue full.')
                 continue
 
-            # System command forwarded to Java
             try:
                 command_queue.put_nowait({'text': cleaned, 'intent': intent})
             except queue.Full:
@@ -188,8 +192,11 @@ def main():
     classifier = IntentClassifier()
     classifier.train()
 
+    print('[Bridge] Loading Gemini chat backend...')
+    chat_backend = GeminiChat()
+
     threading.Thread(
-        target=voice_capture_loop, args=(listener, classifier),
+        target=voice_capture_loop, args=(listener, classifier, chat_backend),
         daemon=True, name='VoiceCapture').start()
 
     threading.Thread(
