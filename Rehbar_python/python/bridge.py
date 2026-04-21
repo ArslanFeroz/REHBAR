@@ -1,29 +1,16 @@
 """
-bridge.py  --  Rehbar Python Bridge  (Flask REST API)
+bridge_final.py  --  Rehbar Python bridge final
 
-Why Flask instead of raw TCP sockets:
-  - HTTP is self-framing; no newline-delimiter bugs or makefile() deadlocks.
-  - Java polls /health until ready — no Thread.sleep() timing hacks.
-  - /health returns 503 while loading, 200 only when every component is ready.
-    Java therefore never enters its command loop before Python is fully up.
-  - Each request is independent; a transient error never corrupts the session.
-
-Startup order (critical):
-  1. Flask thread starts  -> port 5000 open, /health returns 503
-  2. Heavy init on main thread  (TTS, VoiceListener, Classifier)
-  3. Worker threads start
-  4. _ready = True  -> /health returns 200
-  5. Java sees 200 and enters its command loop
-
-Gemini stub:
-  The classifier returns intent="CHAT" for conversational inputs.
-  handle_chat() is a stub that returns a placeholder — wire Gemini here later.
+Changes included:
+- uses voice_listener_final.py
+- uses intent_classifier_final.py
+- understands AI_ENABLE / AI_DISABLE
+- keeps your original bridge architecture
 """
 
 import os
 import sys
 import re
-import socket
 import threading
 import queue
 import time
@@ -36,18 +23,17 @@ if hasattr(sys.stderr, 'reconfigure'):
 from flask import Flask, request, jsonify
 
 from voice_listener import VoiceListener
-from tts_engine     import TTSEngine
+from tts_engine import TTSEngine
 from intent_classifier import IntentClassifier
 
-HOST            = '127.0.0.1'
-PORT            = 5000
-COMMAND_TIMEOUT = 8   # seconds Flask waits on /command before returning 204
+HOST = '127.0.0.1'
+PORT = 5000
+COMMAND_TIMEOUT = 8
 
-# Only system-command payloads reach this queue; CHAT is handled here.
 command_queue: queue.Queue = queue.Queue(maxsize=10)
-tts_queue:     queue.Queue = queue.Queue(maxsize=20)
+tts_queue: queue.Queue = queue.Queue(maxsize=20)
 
-_ready      = False
+_ready = False
 _ready_lock = threading.Lock()
 PROCESS_PID = os.getpid()
 
@@ -67,26 +53,15 @@ def _set_ready() -> None:
         _ready = True
 
 
-# ── Endpoints ──────────────────────────────────────────────────────────────────
-
 @app.route('/health', methods=['GET'])
 def health():
-    """
-    503 while loading, 200 when all components are ready.
-    Java's waitForHealth() keeps retrying until it gets 200.
-    """
     if _is_ready():
-        return jsonify({'status': 'ok',      'pid': PROCESS_PID}), 200
-    return     jsonify({'status': 'loading', 'pid': PROCESS_PID}), 503
+        return jsonify({'status': 'ok', 'pid': PROCESS_PID}), 200
+    return jsonify({'status': 'loading', 'pid': PROCESS_PID}), 503
 
 
 @app.route('/command', methods=['GET'])
 def get_command():
-    """
-    Long-poll: Java calls this in a tight loop.
-    Returns the next voice command as JSON, or 204 if nothing arrived
-    within COMMAND_TIMEOUT seconds (Java will retry immediately).
-    """
     if not _is_ready():
         return ('', 503)
     try:
@@ -99,7 +74,6 @@ def get_command():
 
 @app.route('/speak', methods=['POST'])
 def speak():
-    """Java POSTs {"text": "..."} here after executing a command."""
     data = request.get_json(silent=True)
     if not data or 'text' not in data:
         return jsonify({'error': 'Missing text field'}), 400
@@ -109,21 +83,12 @@ def speak():
     return jsonify({'status': 'queued'}), 200
 
 
-# ── Gemini stub ────────────────────────────────────────────────────────────────
-
 def handle_chat(text: str) -> str:
-    """
-    Stub for conversational AI.  Wire Gemini here when ready.
-    Returns a placeholder so the app doesn't crash on CHAT intents.
-    """
     print(f'[CHAT stub] "{text}" -- Gemini not yet configured.')
     return "I am still learning to chat. Please give me a command for now."
 
 
-# ── Worker threads ─────────────────────────────────────────────────────────────
-
 def _strip_wake_word(text: str) -> str:
-    """Remove 'rehbar' and common mishearings from start/end of recognised text."""
     text = re.sub(
         r'^\s*(rehbar|rabar|rebar|ribar|raybar|ray\s+bar|re\s+bar'
         r'|hey\s+rehbar|ok\s+rehbar|okay\s+rehbar)\s*',
@@ -134,8 +99,7 @@ def _strip_wake_word(text: str) -> str:
     return text
 
 
-def voice_capture_loop(listener: VoiceListener,
-                       classifier: IntentClassifier) -> None:
+def voice_capture_loop(listener: VoiceListener, classifier: IntentClassifier) -> None:
     print('[VoiceThread] Started.')
     while True:
         try:
@@ -143,7 +107,6 @@ def voice_capture_loop(listener: VoiceListener,
             if not text:
                 continue
 
-            # Strip wake-word before classification
             cleaned = _strip_wake_word(text)
             if not cleaned:
                 continue
@@ -151,11 +114,27 @@ def voice_capture_loop(listener: VoiceListener,
             if cleaned != text:
                 print(f'[VoiceThread] Wake-word stripped: "{text}" -> "{cleaned}"')
 
-            intent = classifier.predict(cleaned)
+            result = classifier.predict_debug(cleaned)
+            intent = result['intent']
+            print(f'[VoiceThread] Result: {result}')
 
-            # CHAT: handle entirely in Python, never reach Java
+            # AI mode toggles are handled here in Python, not sent to Java
+            if intent == 'AI_ENABLE':
+                try:
+                    tts_queue.put_nowait('AI mode enabled.')
+                except queue.Full:
+                    print('[VoiceThread] WARN: tts_queue full.')
+                continue
+
+            if intent == 'AI_DISABLE':
+                try:
+                    tts_queue.put_nowait('AI mode disabled.')
+                except queue.Full:
+                    print('[VoiceThread] WARN: tts_queue full.')
+                continue
+
+            # Chat handled entirely in Python
             if intent == 'CHAT':
-                print(f'[VoiceThread] CHAT: "{cleaned}"')
                 reply = handle_chat(cleaned)
                 try:
                     tts_queue.put_nowait(reply)
@@ -163,7 +142,7 @@ def voice_capture_loop(listener: VoiceListener,
                     print('[VoiceThread] WARN: tts_queue full.')
                 continue
 
-            # System command: forward to Java
+            # System command forwarded to Java
             try:
                 command_queue.put_nowait({'text': cleaned, 'intent': intent})
             except queue.Full:
@@ -171,7 +150,7 @@ def voice_capture_loop(listener: VoiceListener,
 
         except Exception as exc:
             print('[VoiceThread] ERROR: ' + repr(str(exc)))
-            time.sleep(1)
+            time.sleep(0.5)
 
 
 def tts_loop(tts: TTSEngine) -> None:
@@ -185,25 +164,20 @@ def tts_loop(tts: TTSEngine) -> None:
             time.sleep(0.5)
 
 
-# ── Entry point ────────────────────────────────────────────────────────────────
-
 def main():
     print('=' * 54)
     print(f'    Rehbar Python Bridge  --  PID {PROCESS_PID}')
     print('=' * 54)
 
-    # Step 1: Flask starts first so Java can begin polling /health.
-    # /health returns 503 until _set_ready() is called below.
     flask_thread = threading.Thread(
         target=lambda: app.run(
             host=HOST, port=PORT,
             debug=False, use_reloader=False, threaded=True),
         daemon=True, name='FlaskServer')
     flask_thread.start()
-    time.sleep(1.0)   # give Flask time to bind the port
+    time.sleep(1.0)
     print(f'[Bridge] Flask on http://{HOST}:{PORT}  (returning 503 until ready)')
 
-    # Step 2: Heavy init — Java waits on /health during this whole section.
     print('[Bridge] Loading TTS engine...')
     tts = TTSEngine()
 
@@ -214,7 +188,6 @@ def main():
     classifier = IntentClassifier()
     classifier.train()
 
-    # Step 3: Start worker threads.
     threading.Thread(
         target=voice_capture_loop, args=(listener, classifier),
         daemon=True, name='VoiceCapture').start()
@@ -223,12 +196,10 @@ def main():
         target=tts_loop, args=(tts,),
         daemon=True, name='TTSOutput').start()
 
-    # Step 4: Signal Java — /health now returns 200.
     _set_ready()
     print('[Bridge] All systems ready  --  /health -> 200')
     print('=' * 54)
 
-    # Keep main thread alive (all workers are daemon threads).
     try:
         while True:
             time.sleep(1)
