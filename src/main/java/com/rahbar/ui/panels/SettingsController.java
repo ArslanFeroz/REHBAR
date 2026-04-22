@@ -283,6 +283,9 @@ public class SettingsController implements Initializable {
 
             showFeedback("✓  Settings saved. Restart to apply hotkey changes.", true);
 
+            // Notify Python bridge to reload voice/TTS settings immediately
+            com.rahbar.RahbarApp.notifySettingsChanged();
+
         } catch (Exception e) {
             showFeedback("Error saving settings: " + e.getMessage(), false);
         }

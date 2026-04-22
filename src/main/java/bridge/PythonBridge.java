@@ -194,12 +194,38 @@ public class PythonBridge {
         if (code != 200) throw new IOException("Unexpected /speak HTTP " + code);
     }
 
+    // ── Listening control ─────────────────────────────────────────────────────
+
+    /** Tell Python to start capturing voice (widget entered LISTENING). */
+    public void startListening() throws Exception {
+        postNoBody(BASE_URL + "/listen/start");
+    }
+
+    /** Tell Python to stop capturing voice (widget left LISTENING). */
+    public void stopListening() throws Exception {
+        postNoBody(BASE_URL + "/listen/stop");
+    }
+
+    /** Tell Python to reload voice/TTS settings from the DB. */
+    public void reloadSettings() throws Exception {
+        postNoBody(BASE_URL + "/settings/reload");
+    }
+
     // ── Shutdown ───────────────────────────────────────────────────────────────
 
     public void shutdown() {
+        forceShutdown();
+    }
+
+    /** Kills the Python process and all its children (used by shutdown hook too). */
+    public void forceShutdown() {
         if (pythonProcess != null && pythonProcess.isAlive()) {
-            pythonProcess.destroy();
-            System.out.println("[Bridge] Python process terminated.");
+            try {
+                // Kill child processes first (e.g. sub-spawned processes)
+                pythonProcess.descendants().forEach(ProcessHandle::destroyForcibly);
+            } catch (Exception ignored) {}
+            pythonProcess.destroyForcibly();
+            System.out.println("[Bridge] Python process forcibly terminated.");
         }
     }
 
@@ -232,6 +258,17 @@ public class PythonBridge {
         conn.setReadTimeout(2_000);
         try { return conn.getResponseCode(); }
         finally { conn.disconnect(); }
+    }
+
+    private void postNoBody(String urlStr) throws Exception {
+        HttpURLConnection conn = openConn(urlStr, "POST");
+        conn.setConnectTimeout(3_000);
+        conn.setReadTimeout(3_000);
+        conn.setDoOutput(false);
+        conn.setFixedLengthStreamingMode(0);
+        int code = conn.getResponseCode();
+        conn.disconnect();
+        if (code != 200) throw new IOException("Unexpected HTTP " + code + " from " + urlStr);
     }
 
     private String escapeJson(String s) {

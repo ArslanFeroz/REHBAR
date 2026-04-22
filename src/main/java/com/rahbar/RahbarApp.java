@@ -4,11 +4,13 @@ import com.rahbar.db.DatabaseManager;
 import com.rahbar.ui.CommandPreviewPopup;
 import com.rahbar.ui.MainWindow;
 import com.rahbar.ui.OnboardingWindow;
+import com.rahbar.ui.ThemeManager;
 import com.rahbar.widget.ArcReactorWidget;
 import com.rahbar.widget.VoiceWakeWordListener;
 import com.rahbar.widget.WidgetState;
 import javafx.application.Application;
 import javafx.application.Platform;
+import javafx.scene.paint.Color;
 import javafx.stage.Stage;
 
 /**
@@ -28,6 +30,9 @@ import javafx.stage.Stage;
  */
 public class RahbarApp extends Application {
 
+    // Static reference used by SettingsController to notify settings changes
+    private static volatile RahbarApp instance;
+
     private MainWindow mainWindow;
 
     // Backend references — set once bridge thread starts
@@ -36,8 +41,17 @@ public class RahbarApp extends Application {
 
     @Override
     public void start(Stage primaryStage) {
+        instance = this;
         primaryStage.hide();
         Platform.setImplicitExit(false);
+
+        // Shutdown hook: fires even when IntelliJ stop button is pressed.
+        // Ensures the Python subprocess is killed so no orphan process remains.
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            System.out.println("[RahbarApp] JVM shutdown — force-killing Python bridge...");
+            bridge.PythonBridge pb = pythonBridgeRef;
+            if (pb != null) pb.forceShutdown();
+        }, "PythonKillHook"));
 
         initDatabase();
 
@@ -56,6 +70,15 @@ public class RahbarApp extends Application {
             ArcReactorWidget widget = ArcReactorWidget.getInstance();
             widget.show(this::onOpenDashboard, this::onExitApp);
 
+            // Restore widget accent color from saved theme (Issue 4)
+            try {
+                String savedTheme = DatabaseManager.getInstance().getSetting("theme");
+                if (savedTheme != null) {
+                    ThemeManager.Theme t = ThemeManager.getInstance().fromStoredName(savedTheme);
+                    widget.setThemeColor(themeToWidgetColor(t));
+                }
+            } catch (Exception ignored) {}
+
             registerWidgetClickListener();
             restoreWidgetPosition();
             startPythonBridge();
@@ -63,6 +86,31 @@ public class RahbarApp extends Application {
 
             System.out.println("[RahbarApp] Startup complete. Widget is live.");
         });
+    }
+
+    private Color themeToWidgetColor(ThemeManager.Theme theme) {
+        return switch (theme) {
+            case BLACK_BLUE     -> Color.web("#3D7EFF");
+            case CHARCOAL_GREEN -> Color.web("#39FF14");
+            case PURPLE_GOLD    -> Color.web("#FFD700");
+            default             -> Color.web("#00B4D8");
+        };
+    }
+
+    /** Called by SettingsController after saving. Notifies Python to reload. */
+    public static void notifySettingsChanged() {
+        RahbarApp app = instance;
+        if (app == null) return;
+        bridge.PythonBridge pb = app.pythonBridgeRef;
+        if (pb == null) return;
+        Thread t = new Thread(() -> {
+            try { pb.reloadSettings(); }
+            catch (Exception e) {
+                System.err.println("[RahbarApp] Settings reload error: " + e.getMessage());
+            }
+        }, "SettingsReloadThread");
+        t.setDaemon(true);
+        t.start();
     }
 
     @Override
@@ -89,11 +137,17 @@ public class RahbarApp extends Application {
                 new ArcReactorWidget.WidgetClickListener() {
                     @Override
                     public void onWidgetClicked() {
-                        // Widget already set state to LISTENING before calling this.
-                        // Just sync the main window status label.
                         System.out.println("[RahbarApp] Widget clicked — listening.");
                         if (mainWindow.isShowing())
                             mainWindow.getController().setStatus("LISTENING", "#00B4D8");
+                        // Enable Python voice capture (Issue 1)
+                        bridge.PythonBridge pb = pythonBridgeRef;
+                        if (pb != null) new Thread(() -> {
+                            try { pb.startListening(); }
+                            catch (Exception e) {
+                                System.err.println("[RahbarApp] startListening error: " + e.getMessage());
+                            }
+                        }, "StartListenThread").start();
                     }
 
                     @Override
@@ -102,6 +156,14 @@ public class RahbarApp extends Application {
                         ArcReactorWidget.getInstance().setState(WidgetState.IDLE);
                         if (mainWindow.isShowing())
                             mainWindow.getController().setStatus("ACTIVE", "#2ECC71");
+                        // Disable Python voice capture (Issue 1)
+                        bridge.PythonBridge pb = pythonBridgeRef;
+                        if (pb != null) new Thread(() -> {
+                            try { pb.stopListening(); }
+                            catch (Exception e) {
+                                System.err.println("[RahbarApp] stopListening error: " + e.getMessage());
+                            }
+                        }, "StopListenThread").start();
                     }
 
                     @Override
@@ -190,6 +252,9 @@ public class RahbarApp extends Application {
 
                         // Send TTS to Python
                         pb.sendResponse(result);
+
+                        // Stop listening now that we've handled the command (Issue 1)
+                        try { pb.stopListening(); } catch (Exception ignored) {}
 
                         // Brief pause then back to IDLE
                         Thread.sleep(500);
