@@ -141,13 +141,7 @@ public class RahbarApp extends Application {
                         if (mainWindow.isShowing())
                             mainWindow.getController().setStatus("LISTENING", "#00B4D8");
                         // Enable Python voice capture (Issue 1)
-                        bridge.PythonBridge pb = pythonBridgeRef;
-                        if (pb != null) new Thread(() -> {
-                            try { pb.startListening(); }
-                            catch (Exception e) {
-                                System.err.println("[RahbarApp] startListening error: " + e.getMessage());
-                            }
-                        }, "StartListenThread").start();
+                        sendListenCommand(true);
                     }
 
                     @Override
@@ -157,13 +151,7 @@ public class RahbarApp extends Application {
                         if (mainWindow.isShowing())
                             mainWindow.getController().setStatus("ACTIVE", "#2ECC71");
                         // Disable Python voice capture (Issue 1)
-                        bridge.PythonBridge pb = pythonBridgeRef;
-                        if (pb != null) new Thread(() -> {
-                            try { pb.stopListening(); }
-                            catch (Exception e) {
-                                System.err.println("[RahbarApp] stopListening error: " + e.getMessage());
-                            }
-                        }, "StopListenThread").start();
+                        sendListenCommand(false);
                     }
 
                     @Override
@@ -172,6 +160,26 @@ public class RahbarApp extends Application {
                     }
                 }
         );
+    }
+
+    private void sendListenCommand(boolean start) {
+        bridge.PythonBridge pb = pythonBridgeRef;
+        if (pb == null) {
+            System.err.println("[RahbarApp] sendListenCommand(" + start + ") ignored — bridge not ready.");
+            return;
+        }
+        Thread t = new Thread(() -> {
+            try {
+                if (start) pb.startListening();
+                else        pb.stopListening();
+                System.out.println("[RahbarApp] Python listening " + (start ? "STARTED" : "STOPPED") + " OK.");
+            } catch (Exception e) {
+                System.err.println("[RahbarApp] " + (start ? "startListening" : "stopListening")
+                        + " HTTP error: " + e.getMessage());
+            }
+        }, start ? "StartListenThread" : "StopListenThread");
+        t.setDaemon(true);
+        t.start();
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -253,8 +261,11 @@ public class RahbarApp extends Application {
                         // Send TTS to Python
                         pb.sendResponse(result);
 
-                        // Stop listening now that we've handled the command (Issue 1)
-                        try { pb.stopListening(); } catch (Exception ignored) {}
+                        // Stop listening now that we've handled the command
+                        try { pb.stopListening(); }
+                        catch (Exception e) {
+                            System.err.println("[RahbarApp] stopListening error: " + e.getMessage());
+                        }
 
                         // Brief pause then back to IDLE
                         Thread.sleep(500);

@@ -264,8 +264,8 @@ public class PythonBridge {
         HttpURLConnection conn = openConn(urlStr, "POST");
         conn.setConnectTimeout(3_000);
         conn.setReadTimeout(3_000);
-        conn.setDoOutput(false);
-        conn.setFixedLengthStreamingMode(0);
+        conn.setDoOutput(true);          // must be true for POST
+        conn.setFixedLengthStreamingMode(0); // Content-Length: 0, no body written
         int code = conn.getResponseCode();
         conn.disconnect();
         if (code != 200) throw new IOException("Unexpected HTTP " + code + " from " + urlStr);
