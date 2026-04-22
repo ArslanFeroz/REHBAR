@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.control.*?>
+<?import javafx.geometry.Insets?>
+
+<!--
+    profile.fxml
+    User personal details: name, preferred greeting, assistant name, timezone.
+    All values are saved to SQLite settings table.
+
+    Controller: ProfileController.java
+-->
+<VBox
+    xmlns:fx="http://javafx.com/fxml"
+    fx:controller="com.rahbar.ui.panels.ProfileController"
+    spacing="0"
+    style="-fx-background-color: transparent;">
+
+    <!-- ── Page header ─────────────────────────────────────────────────── -->
+    <VBox spacing="4" style="-fx-padding: 0 0 28 0;">
+        <Label text="Profile" styleClass="page-title"/>
+        <Label text="Your personal details and how RAHBAR addresses you"
+               styleClass="page-subtitle"/>
+    </VBox>
+
+    <ScrollPane fitToWidth="true" style="-fx-background: transparent; -fx-background-color: transparent;">
+        <VBox spacing="20">
+
+            <!-- ── Identity card ───────────────────────────────────────── -->
+            <VBox styleClass="card" spacing="20">
+                <Label text="YOUR IDENTITY" styleClass="form-label"/>
+
+                <HBox spacing="20">
+                    <!-- First name -->
+                    <VBox spacing="6" HBox.hgrow="ALWAYS">
+                        <Label text="First Name" styleClass="form-label"/>
+                        <TextField fx:id="fieldFirstName" promptText="e.g. Tony"/>
+                    </VBox>
+                    <!-- Last name -->
+                    <VBox spacing="6" HBox.hgrow="ALWAYS">
+                        <Label text="Last Name" styleClass="form-label"/>
+                        <TextField fx:id="fieldLastName" promptText="e.g. Stark"/>
+                    </VBox>
+                </HBox>
+
+                <!-- Preferred greeting name -->
+                <VBox spacing="6">
+                    <Label text="What should RAHBAR call you?" styleClass="form-label"/>
+                    <TextField fx:id="fieldNickname" promptText="e.g. Boss, Tony, Sir"/>
+                    <Label text="This is used in RAHBAR's spoken responses — 'Good morning, Boss.'"
+                           styleClass="card-body"/>
+                </VBox>
+
+            </VBox>
+
+            <!-- ── Assistant identity card ─────────────────────────────── -->
+            <VBox styleClass="card" spacing="20">
+                <Label text="ASSISTANT IDENTITY" styleClass="form-label"/>
+
+                <!-- Assistant name -->
+                <VBox spacing="6">
+                    <Label text="Assistant Name" styleClass="form-label"/>
+                    <TextField fx:id="fieldAssistantName" promptText="e.g. RAHBAR, JARVIS, FRIDAY"/>
+                    <Label text="RAHBAR will introduce itself with this name."
+                           styleClass="card-body"/>
+                </VBox>
+
+                <!-- Wake word display (read-only — just informational) -->
+                <VBox spacing="6">
+                    <Label text="Wake Phrase (fixed)" styleClass="form-label"/>
+                    <HBox alignment="CENTER_LEFT" spacing="10">
+                        <TextField text="RAHBAR guide me" editable="false"
+                                   style="-fx-opacity: 0.6;" HBox.hgrow="ALWAYS"/>
+                        <Label text="●  Always active" styleClass="badge badge-success"/>
+                    </HBox>
+                    <Label text="This phrase is fixed in the current version."
+                           styleClass="card-body"/>
+                </VBox>
+
+            </VBox>
+
+            <!-- ── System preferences card ─────────────────────────────── -->
+            <VBox styleClass="card" spacing="20">
+                <Label text="SYSTEM PREFERENCES" styleClass="form-label"/>
+
+                <!-- Launch on startup -->
+                <HBox alignment="CENTER_LEFT" spacing="12">
+                    <VBox spacing="3" HBox.hgrow="ALWAYS">
+                        <Label text="Launch on Windows Startup" styleClass="card-title"/>
+                        <Label text="RAHBAR widget will start automatically when you log in."
+                               styleClass="card-body"/>
+                    </VBox>
+                    <CheckBox fx:id="checkStartup"/>
+                </HBox>
+
+                <Region style="-fx-pref-height: 1px;" styleClass="section-divider"/>
+
+                <!-- Show widget on launch -->
+                <HBox alignment="CENTER_LEFT" spacing="12">
+                    <VBox spacing="3" HBox.hgrow="ALWAYS">
+                        <Label text="Show Widget on Launch" styleClass="card-title"/>
+                        <Label text="Show the Arc Reactor widget immediately on startup."
+                               styleClass="card-body"/>
+                    </VBox>
+                    <CheckBox fx:id="checkShowWidget" selected="true"/>
+                </HBox>
+
+                <Region style="-fx-pref-height: 1px;" styleClass="section-divider"/>
+
+                <!-- Confirm before delete -->
+                <HBox alignment="CENTER_LEFT" spacing="12">
+                    <VBox spacing="3" HBox.hgrow="ALWAYS">
+                        <Label text="Confirm Before Deleting Files" styleClass="card-title"/>
+                        <Label text="RAHBAR will ask for confirmation before any delete operation."
+                               styleClass="card-body"/>
+                    </VBox>
+                    <CheckBox fx:id="checkConfirmDelete" selected="true"/>
+                </HBox>
+
+            </VBox>
+
+            <!-- ── Save / reset buttons ────────────────────────────────── -->
+            <HBox spacing="12" alignment="CENTER_RIGHT" style="-fx-padding: 4 0 0 0;">
+                <Button text="Reset to Defaults" styleClass="btn-secondary"
+                        onAction="#onResetDefaults"/>
+                <Button text="Save Profile" styleClass="btn-primary"
+                        onAction="#onSaveProfile"/>
+            </HBox>
+
+            <!-- Feedback label -->
+            <Label fx:id="feedbackLabel" text="" style="-fx-text-fill: -color-success; -fx-font-size: 12px;"
+                   visible="false"/>
+
+            <Region style="-fx-pref-height: 20px;"/>
+        </VBox>
+    </ScrollPane>
+
+</VBox>

@@ -441,6 +441,211 @@ public class DatabaseManager {
         System.out.println("[DB] training_data seeded / expanded.");
     }
 
+    // ── Settings ───────────────────────────────────────────────────────────────
+
+    public String getSetting(String key) {
+        String sql = "SELECT value FROM settings WHERE key = ?";
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setString(1, key);
+            ResultSet rs = ps.executeQuery();
+            return rs.next() ? rs.getString("value") : null;
+        } catch (SQLException e) {
+            System.err.println("[DB] getSetting: " + e.getMessage());
+            return null;
+        }
+    }
+
+    public void saveSetting(String key, String value) {
+        String sql = "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)";
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setString(1, key);
+            ps.setString(2, value);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            System.err.println("[DB] saveSetting: " + e.getMessage());
+        }
+    }
+
+    // ── Command log (frontend query methods) ───────────────────────────────────
+
+    public List<CommandLog> getRecentCommands(int limit) {
+        List<CommandLog> list = new ArrayList<>();
+        String sql = "SELECT text, type, status, timestamp FROM command_log ORDER BY timestamp DESC LIMIT ?";
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setInt(1, limit);
+            ResultSet rs = ps.executeQuery();
+            while (rs.next()) {
+                list.add(new CommandLog(
+                        rs.getString("text"),
+                        rs.getString("type"),
+                        rs.getString("status"),
+                        rs.getString("timestamp")));
+            }
+        } catch (SQLException e) {
+            System.err.println("[DB] getRecentCommands: " + e.getMessage());
+        }
+        return list;
+    }
+
+    public int getCommandCountToday() {
+        String sql = "SELECT COUNT(*) FROM command_log WHERE DATE(timestamp) = DATE('now')";
+        try (PreparedStatement ps = connection.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            return rs.next() ? rs.getInt(1) : 0;
+        } catch (SQLException e) {
+            System.err.println("[DB] getCommandCountToday: " + e.getMessage());
+            return 0;
+        }
+    }
+
+    public int getSuccessRatePercent(int lastN) {
+        String sql = "SELECT ROUND(100.0 * SUM(CASE WHEN status = 'SUCCESS' THEN 1 ELSE 0 END) / COUNT(*))" +
+                     " FROM (SELECT status FROM command_log ORDER BY timestamp DESC LIMIT ?)";
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setInt(1, lastN);
+            ResultSet rs = ps.executeQuery();
+            return rs.next() ? rs.getInt(1) : 0;
+        } catch (SQLException e) {
+            System.err.println("[DB] getSuccessRatePercent: " + e.getMessage());
+            return 0;
+        }
+    }
+
+    public void clearCommandLog() {
+        try (PreparedStatement ps = connection.prepareStatement("DELETE FROM command_log")) {
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            System.err.println("[DB] clearCommandLog: " + e.getMessage());
+        }
+    }
+
+    public int[] getCommandCountByHour() {
+        int[] counts = new int[24];
+        String sql = "SELECT CAST(strftime('%H', timestamp) AS INTEGER) AS hour, COUNT(*) AS cnt" +
+                     " FROM command_log WHERE DATE(timestamp) = DATE('now') GROUP BY hour";
+        try (PreparedStatement ps = connection.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                int hour = rs.getInt("hour");
+                if (hour >= 0 && hour < 24) counts[hour] = rs.getInt("cnt");
+            }
+        } catch (SQLException e) {
+            System.err.println("[DB] getCommandCountByHour: " + e.getMessage());
+        }
+        return counts;
+    }
+
+    // ── Alarm query helpers ────────────────────────────────────────────────────
+
+    public String getNextAlarmLabel() {
+        String sql = "SELECT label FROM alarms WHERE is_triggered = 0 AND trigger_time > DATETIME('now')" +
+                     " ORDER BY trigger_time ASC LIMIT 1";
+        try (PreparedStatement ps = connection.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            return rs.next() ? rs.getString("label") : null;
+        } catch (SQLException e) {
+            System.err.println("[DB] getNextAlarmLabel: " + e.getMessage());
+            return null;
+        }
+    }
+
+    // ── App registry (frontend CRUD) ───────────────────────────────────────────
+
+    public int getAppRegistryCount() {
+        try (PreparedStatement ps = connection.prepareStatement("SELECT COUNT(*) FROM app_registry");
+             ResultSet rs = ps.executeQuery()) {
+            return rs.next() ? rs.getInt(1) : 0;
+        } catch (SQLException e) {
+            System.err.println("[DB] getAppRegistryCount: " + e.getMessage());
+            return 0;
+        }
+    }
+
+    public List<String[]> getAllAppAliases() {
+        List<String[]> list = new ArrayList<>();
+        String sql = "SELECT alias, path FROM app_registry ORDER BY alias ASC";
+        try (PreparedStatement ps = connection.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) list.add(new String[]{ rs.getString("alias"), rs.getString("path") });
+        } catch (SQLException e) {
+            System.err.println("[DB] getAllAppAliases: " + e.getMessage());
+        }
+        return list;
+    }
+
+    public void addAppAlias(String alias, String path) throws SQLException {
+        String sql = "INSERT INTO app_registry (alias, path) VALUES (?, ?)";
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setString(1, alias.toLowerCase());
+            ps.setString(2, path);
+            ps.executeUpdate();
+        }
+    }
+
+    public void removeAppAlias(String alias) {
+        String sql = "DELETE FROM app_registry WHERE alias = ?";
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setString(1, alias);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            System.err.println("[DB] removeAppAlias: " + e.getMessage());
+        }
+    }
+
+    // ── Website registry (frontend CRUD) ──────────────────────────────────────
+
+    public List<String[]> getAllWebsiteAliases() {
+        List<String[]> list = new ArrayList<>();
+        String sql = "SELECT alias, url FROM website_registry ORDER BY alias ASC";
+        try (PreparedStatement ps = connection.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) list.add(new String[]{ rs.getString("alias"), rs.getString("url") });
+        } catch (SQLException e) {
+            System.err.println("[DB] getAllWebsiteAliases: " + e.getMessage());
+        }
+        return list;
+    }
+
+    public void addWebsiteAlias(String alias, String url) throws SQLException {
+        String sql = "INSERT INTO website_registry (alias, url) VALUES (?, ?)";
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setString(1, alias.toLowerCase());
+            ps.setString(2, url);
+            ps.executeUpdate();
+        }
+    }
+
+    public void removeWebsiteAlias(String alias) {
+        String sql = "DELETE FROM website_registry WHERE alias = ?";
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setString(1, alias);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            System.err.println("[DB] removeWebsiteAlias: " + e.getMessage());
+        }
+    }
+
+    // ── Inner model class ──────────────────────────────────────────────────────
+
+    public static class CommandLog {
+        private final String text;
+        private final String type;
+        private final String status;
+        private final String timestamp;
+
+        public CommandLog(String text, String type, String status, String timestamp) {
+            this.text      = text      != null ? text      : "";
+            this.type      = type      != null ? type      : "";
+            this.status    = status    != null ? status    : "";
+            this.timestamp = timestamp != null ? timestamp : "";
+        }
+
+        public String getText()      { return text; }
+        public String getType()      { return type; }
+        public String getStatus()    { return status; }
+        public String getTimestamp() { return timestamp; }
+    }
+
     private String inferIntent(String text) {
         String t = text.toLowerCase();
         if (t.contains("alarm") || t.contains("timer") || t.contains("remind") || t.contains("wake me")) {

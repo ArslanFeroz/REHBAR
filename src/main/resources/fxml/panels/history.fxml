@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.control.*?>
+<?import javafx.geometry.Insets?>
+
+<!--
+    history.fxml
+    Full paginated command history with search bar and type/status filters.
+
+    Controller: HistoryController.java
+-->
+<VBox
+    xmlns:fx="http://javafx.com/fxml"
+    fx:controller="com.rahbar.ui.panels.HistoryController"
+    spacing="0"
+    style="-fx-background-color: transparent;">
+
+    <!-- ── Page header ─────────────────────────────────────────────────── -->
+    <VBox spacing="4" style="-fx-padding: 0 0 24 0;">
+        <Label text="Command History" styleClass="page-title"/>
+        <Label text="Every command RAHBAR has processed" styleClass="page-subtitle"/>
+    </VBox>
+
+    <!-- ── Search and filter bar ──────────────────────────────────────── -->
+    <HBox spacing="12" alignment="CENTER_LEFT" style="-fx-padding: 0 0 16 0;">
+        <TextField fx:id="searchField"
+                   promptText="Search commands..."
+                   HBox.hgrow="ALWAYS"/>
+
+        <ComboBox fx:id="filterType" promptText="All Types" prefWidth="140"/>
+        <ComboBox fx:id="filterStatus" promptText="All Statuses" prefWidth="130"/>
+
+        <Button text="Clear" styleClass="btn-secondary"
+                onAction="#onClearFilters"
+                style="-fx-padding: 8 14 8 14;"/>
+        <Button text="Refresh" styleClass="btn-primary"
+                onAction="#onRefresh"
+                style="-fx-padding: 8 14 8 14;"/>
+    </HBox>
+
+    <!-- ── History table ──────────────────────────────────────────────── -->
+    <TableView fx:id="historyTable" VBox.vgrow="ALWAYS">
+        <columns>
+            <TableColumn fx:id="colText"      text="COMMAND"    prefWidth="300"/>
+            <TableColumn fx:id="colType"      text="TYPE"       prefWidth="130"/>
+            <TableColumn fx:id="colStatus"    text="STATUS"     prefWidth="100"/>
+            <TableColumn fx:id="colTimestamp" text="TIMESTAMP"  prefWidth="200"/>
+        </columns>
+        <placeholder>
+            <Label text="No commands found." styleClass="card-body"/>
+        </placeholder>
+    </TableView>
+
+    <!-- ── Footer: count + clear all ─────────────────────────────────── -->
+    <HBox alignment="CENTER_LEFT" spacing="12" style="-fx-padding: 12 0 0 0;">
+        <Label fx:id="rowCountLabel" text="0 commands" styleClass="card-body"/>
+        <Region HBox.hgrow="ALWAYS"/>
+        <Button text="Clear All History" styleClass="btn-danger"
+                onAction="#onClearAllHistory"/>
+    </HBox>
+
+</VBox>

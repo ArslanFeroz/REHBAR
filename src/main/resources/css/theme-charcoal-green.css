@@ -1,0 +1,46 @@
+/*
+ * theme-charcoal-green.css
+ * Theme: Dark Charcoal + Neon Green  —  "Terminal Hacker"
+ */
+
+.root {
+    /* ── Base backgrounds ─────────────────────────────────────────────── */
+    -color-bg-deep:           #0A0A0A;
+    -color-bg-base:           #111411;
+    -color-bg-sidebar:        #0C0E0C;
+    -color-bg-card:           #161A16;
+    -color-bg-card-hover:     #1C221C;
+    -color-bg-input:          #131713;
+    -color-bg-header:         #0E110E;
+
+    /* ── Primary accent (neon green) ──────────────────────────────────── */
+    -color-accent:            #39FF14;
+    -color-accent-bright:     #7FFF5F;
+    -color-accent-dim:        #1E8C00;
+    -color-accent-glow:       #0A1F0A;
+
+    /* ── Text ─────────────────────────────────────────────────────────── */
+    -color-text-primary:      #D8F5D0;
+    -color-text-secondary:    #6FCF6F;
+    -color-text-muted:        #2E4A2E;
+    -color-text-accent:       #39FF14;
+
+    /* ── Status colors ────────────────────────────────────────────────── */
+    -color-success:           #39FF14;
+    -color-warning:           #FFD700;
+    -color-error:             #FF4444;
+    -color-info:              #39FF14;
+
+    /* ── Borders & dividers ───────────────────────────────────────────── */
+    -color-border:            #0A2A0A;
+    -color-border-bright:     #1A5A1A;
+    -color-divider:           #061006;
+
+    /* ── Scrollbar ────────────────────────────────────────────────────── */
+    -color-scrollbar-track:   #0C0E0C;
+    -color-scrollbar-thumb:   #1E8C00;
+
+    /* ── Nav active indicator ─────────────────────────────────────────── */
+    -color-nav-active-bg:     #0A1A0A;
+    -color-nav-active-bar:    #39FF14;
+}
