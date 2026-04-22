@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.canvas.*?>
+<?import javafx.geometry.Insets?>
+
+<BorderPane
+    xmlns:fx="http://javafx.com/fxml"
+    fx:controller="com.rahbar.ui.MainWindowController"
+    fx:id="rootPane"
+    styleClass="main-border-pane">
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         TOP BAR
+         ═══════════════════════════════════════════════════════════════ -->
+    <top>
+        <HBox fx:id="topBar" styleClass="top-bar" alignment="CENTER_LEFT" spacing="0">
+
+            <!-- Left: breadcrumb path -->
+            <HBox alignment="CENTER_LEFT" spacing="4" style="-fx-padding: 0 0 0 4;">
+                <Label text="R.A.H.B.A.R" styleClass="topbar-path-root"/>
+                <Label text=" › " styleClass="topbar-path-sep"/>
+                <Label fx:id="topBarPageName" text="dashboard" styleClass="topbar-path-page"/>
+            </HBox>
+
+            <!-- Center: live digital clock — pushed to true center with two ALWAYS spacers -->
+            <Region HBox.hgrow="ALWAYS"/>
+            <Label fx:id="topBarClock" text="00:00:00" styleClass="topbar-clock"/>
+            <Region HBox.hgrow="ALWAYS"/>
+
+            <!-- Right: status + window controls -->
+            <HBox alignment="CENTER" spacing="6" style="-fx-padding: 0 10 0 0;">
+                <Label fx:id="statusDot" text="●"
+                       style="-fx-text-fill: #2ECC71; -fx-font-size: 9px;"/>
+                <Label fx:id="statusLabel" text="ACTIVE" styleClass="topbar-status-text"/>
+            </HBox>
+
+            <HBox spacing="5" alignment="CENTER">
+                <Button text="—" styleClass="window-btn" onAction="#onMinimize" fx:id="btnMinimize"/>
+                <Button text="✕" styleClass="window-btn, window-btn-close"
+                        onAction="#onClose" fx:id="btnClose"/>
+            </HBox>
+
+        </HBox>
+    </top>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         SIDEBAR
+         ═══════════════════════════════════════════════════════════════ -->
+    <left>
+        <VBox fx:id="sidebar" styleClass="sidebar-rail" spacing="0">
+
+            <VBox fx:id="logoBlock" styleClass="rail-logo-block" alignment="CENTER">
+                <Canvas fx:id="logoCanvas" width="32" height="32"/>
+                <VBox fx:id="logoTextBlock" styleClass="rail-logo-text-block" spacing="1">
+                    <Label text="R.A.H.B.A.R" styleClass="rail-logo-title"/>
+                    <Label text="RESPONSIVE AI HELPER" styleClass="rail-logo-sub"/>
+                </VBox>
+            </VBox>
+
+            <Button fx:id="btnToggleSidebar" text="⟩"
+                    styleClass="rail-toggle-btn"
+                    onAction="#onToggleSidebar"
+                    maxWidth="Infinity"/>
+
+            <Region styleClass="rail-divider"/>
+
+            <Label fx:id="labelMain" text="MAIN" styleClass="rail-section-label"/>
+
+            <Button fx:id="btnDashboard" styleClass="nav-btn, nav-btn-active"
+                    onAction="#showDashboard" maxWidth="Infinity">
+                <graphic>
+                    <HBox alignment="CENTER_LEFT" spacing="0">
+                        <Label text="◈" styleClass="rail-nav-icon"/>
+                        <Label fx:id="lblDashboard" text="Dashboard" styleClass="rail-nav-label"/>
+                    </HBox>
+                </graphic>
+            </Button>
+
+            <Button fx:id="btnProfile" styleClass="nav-btn"
+                    onAction="#showProfile" maxWidth="Infinity">
+                <graphic>
+                    <HBox alignment="CENTER_LEFT" spacing="0">
+                        <Label text="◉" styleClass="rail-nav-icon"/>
+                        <Label fx:id="lblProfile" text="Profile" styleClass="rail-nav-label"/>
+                    </HBox>
+                </graphic>
+            </Button>
+
+            <Button fx:id="btnHistory" styleClass="nav-btn"
+                    onAction="#showHistory" maxWidth="Infinity">
+                <graphic>
+                    <HBox alignment="CENTER_LEFT" spacing="0">
+                        <Label text="▤" styleClass="rail-nav-icon"/>
+                        <Label fx:id="lblHistory" text="Command History" styleClass="rail-nav-label"/>
+                    </HBox>
+                </graphic>
+            </Button>
+
+            <Label fx:id="labelSystem" text="SYSTEM" styleClass="rail-section-label"/>
+
+            <Button fx:id="btnSettings" styleClass="nav-btn"
+                    onAction="#showSettings" maxWidth="Infinity">
+                <graphic>
+                    <HBox alignment="CENTER_LEFT" spacing="0">
+                        <Label text="⚙" styleClass="rail-nav-icon"/>
+                        <Label fx:id="lblSettings" text="Voice &amp; Settings" styleClass="rail-nav-label"/>
+                    </HBox>
+                </graphic>
+            </Button>
+
+            <Button fx:id="btnRegistry" styleClass="nav-btn"
+                    onAction="#showRegistry" maxWidth="Infinity">
+                <graphic>
+                    <HBox alignment="CENTER_LEFT" spacing="0">
+                        <Label text="⬡" styleClass="rail-nav-icon"/>
+                        <Label fx:id="lblRegistry" text="App &amp; Web Registry" styleClass="rail-nav-label"/>
+                    </HBox>
+                </graphic>
+            </Button>
+
+            <Region VBox.vgrow="ALWAYS"/>
+
+            <VBox fx:id="versionBlock" styleClass="rail-version-block" spacing="2">
+                <Region styleClass="rail-divider"/>
+                <Label text="RAHBAR v1.0.0" styleClass="rail-version-text"/>
+            </VBox>
+
+        </VBox>
+    </left>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         CONTENT AREA
+         ═══════════════════════════════════════════════════════════════ -->
+    <center>
+        <StackPane fx:id="contentArea" styleClass="content-area"/>
+    </center>
+
+</BorderPane>

@@ -1,0 +1,53 @@
+/*
+ * theme-white-black.css
+ * Theme: White + Black  —  "The Editorial"
+ *
+ * Dark charcoal sidebar, clean white content canvas.
+ * Professional, print-inspired, zero AI slop.
+ * Widget accent stays Navy+Cyan (handled in SettingsController).
+ *
+ * JavaFX CSS variables use single-dash prefix: -color-name
+ * rgba() is not supported — hex with opacity approximated as solid hex.
+ */
+
+.root {
+    /* ── Base backgrounds ─────────────────────────────────────────────── */
+    -color-bg-deep:           #111111;
+    -color-bg-base:           #F5F5F3;
+    -color-bg-sidebar:        #1A1A1A;
+    -color-bg-card:           #FFFFFF;
+    -color-bg-card-hover:     #F0EEE8;
+    -color-bg-input:          #F8F8F6;
+    -color-bg-header:         #141414;
+
+    /* ── Primary accent (pure black on light, used for borders/highlights) */
+    -color-accent:            #111111;
+    -color-accent-bright:     #333333;
+    -color-accent-dim:        #555555;
+    -color-accent-glow:       #E8E8E4;
+
+    /* ── Text ─────────────────────────────────────────────────────────── */
+    -color-text-primary:      #111111;
+    -color-text-secondary:    #444444;
+    -color-text-muted:        #999999;
+    -color-text-accent:       #111111;
+
+    /* ── Status colors ────────────────────────────────────────────────── */
+    -color-success:           #2E7D32;
+    -color-warning:           #E65100;
+    -color-error:             #C62828;
+    -color-info:              #1565C0;
+
+    /* ── Borders & dividers ───────────────────────────────────────────── */
+    -color-border:            #DDDDDA;
+    -color-border-bright:     #AAAAAA;
+    -color-divider:           #E8E8E4;
+
+    /* ── Scrollbar ────────────────────────────────────────────────────── */
+    -color-scrollbar-track:   #F0EEE8;
+    -color-scrollbar-thumb:   #CCCCCC;
+
+    /* ── Nav active indicator ─────────────────────────────────────────── */
+    -color-nav-active-bg:     #2A2A2A;
+    -color-nav-active-bar:    #FFFFFF;
+}

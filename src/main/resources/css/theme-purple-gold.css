@@ -1,0 +1,46 @@
+/*
+ * theme-purple-gold.css
+ * Theme: Deep Purple + Gold  —  "Premium Luxury"
+ */
+
+.root {
+    /* ── Base backgrounds ─────────────────────────────────────────────── */
+    -color-bg-deep:           #07020F;
+    -color-bg-base:           #0E0620;
+    -color-bg-sidebar:        #06010C;
+    -color-bg-card:           #160930;
+    -color-bg-card-hover:     #1E0E40;
+    -color-bg-input:          #0F0625;
+    -color-bg-header:         #0A0318;
+
+    /* ── Primary accent (gold) ────────────────────────────────────────── */
+    -color-accent:            #FFD700;
+    -color-accent-bright:     #FFE84D;
+    -color-accent-dim:        #B8960A;
+    -color-accent-glow:       #2A1F00;
+
+    /* ── Text ─────────────────────────────────────────────────────────── */
+    -color-text-primary:      #F5EFD0;
+    -color-text-secondary:    #C8A84B;
+    -color-text-muted:        #5A3D6A;
+    -color-text-accent:       #FFD700;
+
+    /* ── Status colors ────────────────────────────────────────────────── */
+    -color-success:           #5CDB5C;
+    -color-warning:           #FFD700;
+    -color-error:             #FF4444;
+    -color-info:              #BB86FC;
+
+    /* ── Borders & dividers ───────────────────────────────────────────── */
+    -color-border:            #2A1F00;
+    -color-border-bright:     #5A4000;
+    -color-divider:           #150F00;
+
+    /* ── Scrollbar ────────────────────────────────────────────────────── */
+    -color-scrollbar-track:   #06010C;
+    -color-scrollbar-thumb:   #B8960A;
+
+    /* ── Nav active indicator ─────────────────────────────────────────── */
+    -color-nav-active-bg:     #1A1000;
+    -color-nav-active-bar:    #FFD700;
+}
