@@ -216,7 +216,15 @@ public class DatabaseManager {
                         "('netflix','https://netflix.com');",
 
                 "INSERT OR IGNORE INTO settings (key,value) VALUES " +
-                        "('voice_speed','160'),('theme','dark'),('ai_enabled','false');"
+                        "('voice_speed','160')," +
+                        "('theme','dark')," +
+                        "('ai_enabled','false')," +
+                        "('ai_enable_phrase','enable ai')," +
+                        "('ai_disable_phrase','disable ai')," +
+                        "('ai_model','gemini-3-flash-preview')," +
+                        "('ai_system_prompt','You are Rehbar, a concise, helpful desktop voice assistant. Reply naturally and keep spoken answers compact unless asked for detail.')," +
+                        "('ai_max_output_tokens','220')," +
+                        "('ai_temperature','0.6');"
         };
 
         try (Statement stmt = connection.createStatement()) {
