@@ -12,9 +12,24 @@ Main goals:
 import os
 import re
 import socket
+import sqlite3
 import threading
 import time
 import speech_recognition as sr
+
+
+def _db_get(key: str, default: str) -> str:
+    try:
+        appdata = os.getenv('APPDATA', os.path.expanduser('~'))
+        db_path = os.path.join(appdata, 'RAHBAR', 'rahbar.db')
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM settings WHERE key=?", (key,))
+        row = cur.fetchone()
+        conn.close()
+        return row[0] if row else default
+    except Exception:
+        return default
 
 # ── Connectivity cache ─────────────────────────────────────────────────────────
 _online = False
@@ -86,18 +101,32 @@ def _clean(text: str) -> str:
 class VoiceListener:
     def __init__(self):
         self.recognizer = sr.Recognizer()
-        self.recognizer.energy_threshold = 280
-        self.recognizer.dynamic_energy_threshold = True
-        self.recognizer.pause_threshold = 0.45
-        self.recognizer.non_speaking_duration = 0.20
-        self.recognizer.phrase_threshold = 0.20
-
         self.microphone = sr.Microphone()
+        self._apply_settings()
 
         with self.microphone as source:
             print('[VoiceFinal] Calibrating once...')
             self.recognizer.adjust_for_ambient_noise(source, duration=0.25)
             print(f'[VoiceFinal] Ready. Energy threshold={self.recognizer.energy_threshold:.1f}')
+
+    def _apply_settings(self):
+        """Apply settings from DB (or use hardcoded defaults)."""
+        try:
+            sensitivity = float(_db_get('voice_sensitivity', '280'))
+            pause = float(_db_get('voice_pause', '0.45'))
+        except ValueError:
+            sensitivity, pause = 280.0, 0.45
+        self.recognizer.energy_threshold = sensitivity
+        self.recognizer.dynamic_energy_threshold = True
+        self.recognizer.pause_threshold = pause
+        self.recognizer.non_speaking_duration = 0.20
+        self.recognizer.phrase_threshold = 0.20
+        print(f'[VoiceFinal] Settings applied: sensitivity={sensitivity}, pause={pause}')
+
+    def reload_settings(self):
+        """Re-read settings from DB and apply. Called by /settings/reload."""
+        self._apply_settings()
+        print('[VoiceFinal] Settings reloaded.')
 
     def listen(self):
         with self.microphone as source:

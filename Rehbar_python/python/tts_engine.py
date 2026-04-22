@@ -13,6 +13,7 @@ Main fixes:
 import asyncio
 import contextlib
 import os
+import sqlite3
 import tempfile
 import threading
 import time
@@ -23,6 +24,24 @@ import pygame
 import edge_tts
 
 VOICE = 'en-GB-ThomasNeural'
+
+# Runtime-adjustable settings (updated by reload_settings())
+_tts_rate = 160
+_tts_volume = 0.9  # 0.0–1.0
+
+
+def _db_get(key: str, default: str) -> str:
+    try:
+        appdata = os.getenv('APPDATA', os.path.expanduser('~'))
+        db_path = os.path.join(appdata, 'RAHBAR', 'rahbar.db')
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM settings WHERE key=?", (key,))
+        row = cur.fetchone()
+        conn.close()
+        return row[0] if row else default
+    except Exception:
+        return default
 
 _online = False
 _online_lock = threading.Lock()
@@ -149,12 +168,27 @@ class TTSEngine:
         if not wrote_audio:
             raise RuntimeError('edge-tts stream returned no audio data')
 
+    def reload_settings(self):
+        """Re-read rate/volume from DB. Called by /settings/reload."""
+        global _tts_rate, _tts_volume
+        try:
+            _tts_rate = int(_db_get('voice_speed', '160'))
+        except ValueError:
+            _tts_rate = 160
+        try:
+            vol_pct = int(_db_get('voice_volume', '90'))
+            _tts_volume = max(0.0, min(1.0, vol_pct / 100.0))
+        except ValueError:
+            _tts_volume = 0.9
+        print(f'[TTS] Settings reloaded: rate={_tts_rate}, volume={_tts_volume:.2f}')
+
     def _speak_offline(self, text: str) -> None:
         try:
             import pyttsx3
 
             engine = pyttsx3.init()
-            engine.setProperty('rate', 160)
+            engine.setProperty('rate', _tts_rate)
+            engine.setProperty('volume', _tts_volume)
             engine.say(text)
             engine.runAndWait()
             engine.stop()

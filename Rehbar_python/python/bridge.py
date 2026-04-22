@@ -16,6 +16,8 @@ Behavior:
 import os
 import sys
 import re
+import signal
+import sqlite3
 import threading
 import queue
 import time
@@ -43,10 +45,34 @@ _ready = False
 _ready_lock = threading.Lock()
 PROCESS_PID = os.getpid()
 
+# ── Listen gate: Java controls when we actually capture voice ─────────────────
+# Starts CLEAR (not listening). Java calls /listen/start when widget is clicked.
+_listen_event = threading.Event()
+
+# Global references so endpoints can update settings at runtime
+_listener_ref: 'VoiceListener | None' = None
+_tts_ref: 'TTSEngine | None' = None
+
 app = Flask(__name__)
 
 import logging
 logging.getLogger('werkzeug').setLevel(logging.WARNING)
+
+
+def _db_get_setting(key: str, default: str) -> str:
+    """Read a single setting from the RAHBAR SQLite DB."""
+    try:
+        appdata = os.getenv('APPDATA', os.path.expanduser('~'))
+        db_path = os.path.join(appdata, 'RAHBAR', 'rahbar.db')
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM settings WHERE key=?", (key,))
+        row = cur.fetchone()
+        conn.close()
+        return row[0] if row else default
+    except Exception as e:
+        print(f'[Bridge] DB read error ({key}): {e}')
+        return default
 
 
 def _is_ready() -> bool:
@@ -89,6 +115,35 @@ def speak():
     return jsonify({'status': 'queued'}), 200
 
 
+@app.route('/listen/start', methods=['POST'])
+def listen_start():
+    _listen_event.set()
+    print('[Bridge] Listening ENABLED by Java.')
+    return jsonify({'status': 'listening'}), 200
+
+
+@app.route('/listen/stop', methods=['POST'])
+def listen_stop():
+    _listen_event.clear()
+    print('[Bridge] Listening DISABLED by Java.')
+    return jsonify({'status': 'stopped'}), 200
+
+
+@app.route('/settings/reload', methods=['POST'])
+def settings_reload():
+    """Reload voice and TTS settings from the DB at runtime."""
+    try:
+        if _listener_ref is not None:
+            _listener_ref.reload_settings()
+        if _tts_ref is not None:
+            _tts_ref.reload_settings()
+        print('[Bridge] Settings reloaded from DB.')
+        return jsonify({'status': 'reloaded'}), 200
+    except Exception as e:
+        print(f'[Bridge] Settings reload error: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
 def _strip_wake_word(text: str) -> str:
     text = re.sub(
         r'^\s*(rehbar|rabar|rebar|ribar|raybar|ray\s+bar|re\s+bar'
@@ -103,8 +158,11 @@ def _strip_wake_word(text: str) -> str:
 def voice_capture_loop(listener: VoiceListener,
                        classifier: IntentClassifier,
                        chat_backend: GeminiChat) -> None:
-    print('[VoiceThread] Started.')
+    print('[VoiceThread] Started. Waiting for Java to enable listening...')
     while True:
+        # Block here when Java has not activated listening (widget not in LISTENING state)
+        if not _listen_event.wait(timeout=0.2):
+            continue
         try:
             text = listener.listen()
             if not text:
@@ -169,9 +227,20 @@ def tts_loop(tts: TTSEngine) -> None:
 
 
 def main():
+    global _listener_ref, _tts_ref
+
     print('=' * 54)
     print(f'    Rehbar Python Bridge  --  PID {PROCESS_PID}')
     print('=' * 54)
+
+    # Graceful shutdown on SIGTERM (sent by Java destroyForcibly / taskkill)
+    def _handle_sigterm(signum, frame):
+        print('[Bridge] SIGTERM received — shutting down.')
+        sys.exit(0)
+    try:
+        signal.signal(signal.SIGTERM, _handle_sigterm)
+    except (AttributeError, OSError):
+        pass  # Windows may not support all signals
 
     flask_thread = threading.Thread(
         target=lambda: app.run(
@@ -184,9 +253,11 @@ def main():
 
     print('[Bridge] Loading TTS engine...')
     tts = TTSEngine()
+    _tts_ref = tts
 
     print('[Bridge] Loading voice listener...')
     listener = VoiceListener()
+    _listener_ref = listener
 
     print('[Bridge] Loading intent classifier...')
     classifier = IntentClassifier()
@@ -205,6 +276,7 @@ def main():
 
     _set_ready()
     print('[Bridge] All systems ready  --  /health -> 200')
+    print('[Bridge] Listening PAUSED — waiting for Java widget click.')
     print('=' * 54)
 
     try:
