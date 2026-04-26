@@ -17,6 +17,24 @@
 #    scikit-learn 1.4.x crashes with numpy 2.x (binary incompatibility)
 # ══════════════════════════════════════════════════════════════════
 
+
+
+# 1. Create venv and activate
+#python -m venv venv
+#venv\Scripts\activate        # Windows
+
+# 2. Install all dependencies
+#cd Rehbar_python\python
+#pip install -r requirements.txt
+
+# 3. PyAudio special case (Windows — if the above fails for PyAudio)
+#pip install pipwin
+#pipwin install pyaudio
+
+# 4. Run
+#python bridge.py
+
+
 # ── Web / REST bridge ──────────────────────────────────────────────
 Flask==3.0.3
 Werkzeug==3.0.3
