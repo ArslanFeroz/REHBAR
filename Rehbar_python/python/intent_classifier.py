@@ -114,6 +114,32 @@ _SITE_KEYWORDS = (
     'google docs', 'google sheets'
 )
 
+# ── Registry cache ─────────────────────────────────────────────────────────────
+import threading as _threading
+_registry_lock = _threading.Lock()
+_registry_cache: dict = {'app': set(), 'web': set(), 'ts': 0.0}
+_REGISTRY_TTL = 30.0   # seconds before re-reading the DB
+
+def _load_registry_names() -> tuple:
+    """Return (app_names, web_names) as lower-cased sets, refreshed every 30s."""
+    import time as _time
+    now = _time.monotonic()
+    with _registry_lock:
+        if now - _registry_cache['ts'] < _REGISTRY_TTL:
+            return _registry_cache['app'], _registry_cache['web']
+        try:
+            conn = sqlite3.connect(DB_PATH, timeout=3)
+            cur = conn.cursor()
+            cur.execute("SELECT name FROM app_registry")
+            apps = {r[0].strip().lower() for r in cur.fetchall() if r[0]}
+            cur.execute("SELECT name FROM website_registry")
+            webs = {r[0].strip().lower() for r in cur.fetchall() if r[0]}
+            conn.close()
+        except Exception:
+            apps, webs = set(), set()
+        _registry_cache.update({'app': apps, 'web': webs, 'ts': now})
+        return apps, webs
+
 def _contains_time(text: str) -> bool:
     return bool(_TIME_COLON_RE.search(text) or _TIME_SHORT_RE.search(text) or _TIME_COMPACT_RE.search(text))
 
@@ -352,14 +378,33 @@ class IntentClassifier:
         if re.search(r'\b(open|launch|start|run|bring up|fire up)\b', text):
             if any(site_kw in text for site_kw in _SITE_KEYWORDS):
                 return 'OPEN_SITE'
+            # Check live registries: if the target word is a known website → OPEN_SITE
+            try:
+                app_names, web_names = _load_registry_names()
+                words = set(text.split())
+                # Multi-word matches: check if any registry name appears as substring
+                if any(wn in text for wn in web_names if wn):
+                    return 'OPEN_SITE'
+                if any(an in text for an in app_names if an):
+                    return 'OPEN_APP'
+            except Exception:
+                pass
             return 'OPEN_APP'
 
         if re.search(r'\b(close|quit|exit|stop|terminate|kill)\b', text):
             return 'CLOSE_APP'
 
         # Search rules after chat/system/alarm checks
-        if re.search(r'\b(search for|look up|find information about|google|search the web for)\b', text):
+        if re.search(r'\b(search for|look up|find information about|search the web for)\b', text):
             return 'WEB_SEARCH'
+        # "google X" — only WEB_SEARCH if X is not a known registry site/app
+        if re.search(r'\bgoogle\b', text):
+            try:
+                app_names, web_names = _load_registry_names()
+                if not any(n in text for n in (web_names | app_names) if n):
+                    return 'WEB_SEARCH'
+            except Exception:
+                return 'WEB_SEARCH'
         if re.search(r'\b(where is|who is|how to)\b', text):
             return 'WEB_SEARCH'
         if text.startswith('what is ') and 'your name' not in text:
