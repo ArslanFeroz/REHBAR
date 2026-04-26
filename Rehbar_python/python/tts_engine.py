@@ -12,6 +12,7 @@ Main fixes:
 
 import asyncio
 import contextlib
+import io
 import os
 import sqlite3
 import tempfile
@@ -23,7 +24,10 @@ from pathlib import Path
 import pygame
 import edge_tts
 
-VOICE = 'en-GB-ThomasNeural'
+# Ryan: British neural voice — natural, confident, a hint of Jarvis charm.
+# Fallback voices tried in order if Ryan is unavailable.
+VOICE         = 'en-GB-RyanNeural'
+VOICE_FALLBACK = 'en-US-GuyNeural'
 
 # Runtime-adjustable settings (updated by reload_settings())
 _tts_rate = 160
@@ -97,7 +101,7 @@ class TTSEngine:
         _online = _check_conn()
         threading.Thread(target=_conn_monitor, daemon=True, name='TTSConnMon').start()
 
-        print(f'[TTS] Ready. Voice={VOICE!r}, online={_online}')
+        print(f'[TTS] Ready. Primary={VOICE!r}, Fallback={VOICE_FALLBACK!r}, online={_online}')
 
     def speak(self, text: str) -> None:
         if not text or not text.strip():
@@ -119,54 +123,61 @@ class TTSEngine:
         self._speak_offline(text)
 
     def _speak_online(self, text: str) -> None:
-        tmp_path = Path(tempfile.gettempdir()) / f'rehbar_tts_{uuid.uuid4().hex}.mp3'
+        # Fetch audio directly into a BytesIO buffer — no temp-file round-trip.
+        with self._loop_lock:
+            audio_bytes = self._loop.run_until_complete(self._fetch_bytes(text))
 
+        if not audio_bytes:
+            raise RuntimeError('edge-tts returned no audio data')
+
+        # pygame 2.x can load from a file-like object; give it an mp3 name hint.
+        buf = io.BytesIO(audio_bytes)
+        buf.name = 'rehbar.mp3'
         try:
-            with self._loop_lock:
-                self._loop.run_until_complete(self._fetch(text, str(tmp_path)))
-
-            if not tmp_path.exists():
-                raise RuntimeError(f'TTS file not created at {tmp_path}')
-
-            if tmp_path.stat().st_size == 0:
-                raise RuntimeError(f'TTS file is empty at {tmp_path}')
-
+            pygame.mixer.music.load(buf)
+        except Exception:
+            # Fallback: write to disk if pygame can't stream from BytesIO
+            tmp_path = Path(tempfile.gettempdir()) / f'rehbar_{uuid.uuid4().hex}.mp3'
             try:
+                tmp_path.write_bytes(audio_bytes)
                 pygame.mixer.music.load(str(tmp_path))
             except Exception as e:
-                raise RuntimeError(f'pygame load failed for {tmp_path}: {e}') from e
-
-            pygame.mixer.music.play()
-            while pygame.mixer.music.get_busy():
-                time.sleep(0.05)
-
-            with contextlib.suppress(Exception):
-                pygame.mixer.music.unload()
-
-        finally:
-            with contextlib.suppress(Exception):
-                if tmp_path.exists():
+                with contextlib.suppress(Exception):
                     tmp_path.unlink()
+                raise RuntimeError(f'pygame load failed: {e}') from e
+
+        pygame.mixer.music.play()
+        while pygame.mixer.music.get_busy():
+            time.sleep(0.05)
+        with contextlib.suppress(Exception):
+            pygame.mixer.music.unload()
 
     @staticmethod
-    async def _fetch(text: str, path: str) -> None:
-        print(f'[TTS] Fetching online audio -> {path}')
-        communicator = edge_tts.Communicate(text, VOICE)
-
+    async def _fetch_bytes(text: str) -> bytes:
+        """Stream edge-tts audio into memory — faster than writing to disk."""
+        print(f'[TTS] Streaming online audio for: {text[:60]}...' if len(text) > 60 else f'[TTS] Streaming: {text}')
+        buf = io.BytesIO()
         wrote_audio = False
-        with open(path, 'wb') as f:
-            async for chunk in communicator.stream():
-                chunk_type = chunk.get('type')
-                if chunk_type == 'audio':
-                    data = chunk.get('data', b'')
-                    if data:
-                        f.write(data)
-                        wrote_audio = True
-                elif chunk_type == 'WordBoundary':
-                    continue
+
+        # Try primary voice, fall back automatically if unavailable
+        for voice in (VOICE, VOICE_FALLBACK):
+            buf.seek(0); buf.truncate()
+            try:
+                async for chunk in edge_tts.Communicate(text, voice).stream():
+                    if chunk.get('type') == 'audio':
+                        data = chunk.get('data', b'')
+                        if data:
+                            buf.write(data)
+                            wrote_audio = True
+                if wrote_audio:
+                    print(f'[TTS] Voice={voice!r}')
+                    break
+            except Exception as e:
+                print(f'[TTS] Voice {voice!r} failed: {e}. Trying next...')
 
         if not wrote_audio:
-            raise RuntimeError('edge-tts stream returned no audio data')
+            raise RuntimeError('All edge-tts voices failed to return audio data')
+        return buf.getvalue()
 
     def reload_settings(self):
         """Re-read rate/volume from DB. Called by /settings/reload."""

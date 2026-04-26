@@ -279,6 +279,16 @@ def main():
     print('[Bridge] Listening PAUSED — waiting for Java widget click.')
     print('=' * 54)
 
+    # Welcome quote — plays once every time Rehbar boots up
+    _WELCOME = (
+        "Rehbar online. All systems operational. "
+        "I'm at your service — and unlike your other apps, I actually listen."
+    )
+    try:
+        tts_queue.put_nowait(_WELCOME)
+    except queue.Full:
+        pass
+
     try:
         while True:
             time.sleep(1)

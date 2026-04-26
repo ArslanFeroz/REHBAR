@@ -267,8 +267,8 @@ public class RahbarApp extends Application {
                             System.err.println("[RahbarApp] stopListening error: " + e.getMessage());
                         }
 
-                        // Brief pause then back to IDLE
-                        Thread.sleep(500);
+                        // Brief pause so the SPEAKING state registers visually
+                        Thread.sleep(100);
                         Platform.runLater(() -> {
                             ArcReactorWidget.getInstance().setState(WidgetState.IDLE);
                             if (mainWindow != null && mainWindow.isShowing())

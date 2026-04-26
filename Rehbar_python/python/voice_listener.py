@@ -113,14 +113,16 @@ class VoiceListener:
         """Apply settings from DB (or use hardcoded defaults)."""
         try:
             sensitivity = float(_db_get('voice_sensitivity', '280'))
-            pause = float(_db_get('voice_pause', '0.45'))
+            # Default pause_threshold lowered to 0.3s (was 0.45s) — shaves ~150ms
+            # off every command by detecting end-of-speech faster.
+            pause = float(_db_get('voice_pause', '0.30'))
         except ValueError:
-            sensitivity, pause = 280.0, 0.45
-        self.recognizer.energy_threshold = sensitivity
+            sensitivity, pause = 280.0, 0.30
+        self.recognizer.energy_threshold        = sensitivity
         self.recognizer.dynamic_energy_threshold = True
-        self.recognizer.pause_threshold = pause
-        self.recognizer.non_speaking_duration = 0.20
-        self.recognizer.phrase_threshold = 0.20
+        self.recognizer.pause_threshold          = pause
+        self.recognizer.non_speaking_duration    = 0.15   # was 0.20
+        self.recognizer.phrase_threshold         = 0.20
         print(f'[VoiceFinal] Settings applied: sensitivity={sensitivity}, pause={pause}')
 
     def reload_settings(self):
