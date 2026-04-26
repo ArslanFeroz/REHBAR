@@ -1,8 +1,8 @@
 """
 gesture_controller.py  --  Rehbar Gesture Controller
+                            (MediaPipe 0.10+ Tasks API)
 
-Detects 9 hand gestures via webcam (MediaPipe Hands) and maps each to
-a system or Rehbar-specific action.
+Detects 9 hand gestures via webcam and maps each to an action.
 
 ──────────────────────────────────────────────────────────────────────
  #   Gesture             Hand Shape            Action
@@ -20,21 +20,43 @@ a system or Rehbar-specific action.
 
 Requires:
     pip install opencv-python mediapipe pyautogui pynput
+
+Model file (~7.5 MB) is auto-downloaded from Google on first run to
+%APPDATA%/RAHBAR/hand_landmarker.task
 """
 
 import datetime
 import os
 import threading
 import time
+import urllib.request
 from typing import Optional
 
-# ── Gesture tuning ─────────────────────────────────────────────────────────────
-CONFIRM_FRAMES   = 7      # consecutive frames before triggering (≈0.23s @30fps)
+# ── Model config ────────────────────────────────────────────────────────────────
+_APPDATA     = os.getenv('APPDATA', os.path.expanduser('~'))
+_MODEL_DIR   = os.path.join(_APPDATA, 'RAHBAR')
+_MODEL_PATH  = os.path.join(_MODEL_DIR, 'hand_landmarker.task')
+_MODEL_URL   = (
+    'https://storage.googleapis.com/mediapipe-models/'
+    'hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task'
+)
+
+# ── Gesture tuning ──────────────────────────────────────────────────────────────
+CONFIRM_FRAMES   = 7      # consecutive frames before triggering (~0.23s @30fps)
 GESTURE_COOLDOWN = 1.8    # seconds before same gesture can re-fire
 SCROLL_AMOUNT    = 5      # scroll lines per scroll gesture
 VOLUME_STEPS     = 3      # volume key presses per gesture
 
-# Maps gesture name → human-readable label
+# Hand landmark connections for manual drawing (MediaPipe 0.10 removed mp_draw)
+_HAND_CONNECTIONS = [
+    (0,1),(1,2),(2,3),(3,4),          # thumb
+    (0,5),(5,6),(6,7),(7,8),          # index
+    (0,9),(9,10),(10,11),(11,12),     # middle
+    (0,13),(13,14),(14,15),(15,16),   # ring
+    (0,17),(17,18),(18,19),(19,20),   # pinky
+    (5,9),(9,13),(13,17),             # palm
+]
+
 GESTURE_LABELS = {
     'OPEN_PALM':      'Screenshot',
     'FIST':           'Toggle Widget',
@@ -48,31 +70,38 @@ GESTURE_LABELS = {
 }
 
 
-def _lazy_imports():
-    """Import heavy libs only when the controller actually starts."""
-    import cv2
-    import mediapipe as mp
-    import pyautogui
-    pyautogui.FAILSAFE = False
-    return cv2, mp, pyautogui
+def _ensure_model() -> Optional[str]:
+    """Download the hand landmark model if not already cached. Returns path or None."""
+    if os.path.exists(_MODEL_PATH):
+        return _MODEL_PATH
+    try:
+        os.makedirs(_MODEL_DIR, exist_ok=True)
+        print(f'[Gesture] Downloading hand landmark model (~7.5 MB)...')
+        urllib.request.urlretrieve(_MODEL_URL, _MODEL_PATH)
+        size_mb = os.path.getsize(_MODEL_PATH) / 1024 / 1024
+        print(f'[Gesture] Model downloaded ({size_mb:.1f} MB) -> {_MODEL_PATH}')
+        return _MODEL_PATH
+    except Exception as e:
+        print(f'[Gesture] Could not download model: {e}')
+        if os.path.exists(_MODEL_PATH):
+            os.remove(_MODEL_PATH)  # remove partial download
+        return None
 
 
 class GestureController:
     """
-    Runs in a daemon thread.  Create once, call start() / stop() as needed.
+    Runs in a daemon thread. Create once, call start() / stop() as needed.
 
     Parameters
     ----------
     listen_event : threading.Event
-        When set, Python will capture voice.  L-Shape gesture sets it.
+        When set, Python captures voice. L-Shape gesture sets it.
     tts_queue : queue.Queue
-        Drop spoken feedback strings here (screenshot confirmation only).
+        Drop spoken feedback strings here.
     command_queue : queue.Queue
-        Drop {'text':..., 'intent': 'GESTURE_...'} dicts here so Java
-        can handle Rehbar-specific gestures (widget toggle, etc.).
+        Drop {'text':..., 'intent': 'GESTURE_...'} dicts here for Java.
     show_preview : bool
-        Show a small camera-overlay window (default True so users can
-        see which gesture is recognised during setup).
+        Show camera overlay window (default True).
     """
 
     def __init__(self, listen_event=None, tts_queue=None,
@@ -85,11 +114,10 @@ class GestureController:
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
 
-        # Per-gesture state for debounce / cooldown
-        self._pending:      dict = {}   # gesture → consecutive-frame count
-        self._last_trigger: dict = {}   # gesture → last trigger timestamp
+        self._pending:      dict = {}
+        self._last_trigger: dict = {}
 
-    # ── Public API ─────────────────────────────────────────────────────────────
+    # ── Public API ──────────────────────────────────────────────────────────────
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -99,7 +127,7 @@ class GestureController:
         self._thread = threading.Thread(
             target=self._run, daemon=True, name='GestureThread')
         self._thread.start()
-        print('[Gesture] Controller started. Press Q in preview window to stop.')
+        print('[Gesture] Controller started.')
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -108,21 +136,45 @@ class GestureController:
     def is_running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
-    # ── Main loop ──────────────────────────────────────────────────────────────
+    # ── Main loop ────────────────────────────────────────────────────────────────
 
     def _run(self) -> None:
+        # ── Import heavy libs ────────────────────────────────────────────────────
         try:
-            cv2, mp, pyautogui = _lazy_imports()
+            import cv2
+            import mediapipe as mp
+            from mediapipe.tasks import python as mp_tasks
+            from mediapipe.tasks.python import vision as mp_vision
+            import pyautogui
+            pyautogui.FAILSAFE = False
+            self._pyag = pyautogui
         except ImportError as e:
             print(f'[Gesture] Missing dependency: {e}')
-            print('[Gesture] Run: pip install opencv-python mediapipe pyautogui pynput')
+            print('[Gesture] Run: pip install opencv-python mediapipe pyautogui')
             return
 
-        mp_hands   = mp.solutions.hands
-        mp_draw    = mp.solutions.drawing_utils
-        self._pyag = pyautogui
+        # ── Ensure model file ────────────────────────────────────────────────────
+        model_path = _ensure_model()
+        if model_path is None:
+            print('[Gesture] No model file available — gesture detection disabled.')
+            return
 
-        cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)   # CAP_DSHOW = faster on Windows
+        # ── Configure HandLandmarker ─────────────────────────────────────────────
+        try:
+            base_options = mp_tasks.BaseOptions(model_asset_path=model_path)
+            options = mp_vision.HandLandmarkerOptions(
+                base_options=base_options,
+                running_mode=mp_vision.RunningMode.VIDEO,
+                num_hands=1,
+                min_hand_detection_confidence=0.70,
+                min_tracking_confidence=0.60,
+            )
+        except Exception as e:
+            print(f'[Gesture] HandLandmarker config error: {e}')
+            return
+
+        # ── Open camera ──────────────────────────────────────────────────────────
+        cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
         if not cap.isOpened():
             print('[Gesture] ERROR: Cannot open webcam (index 0). '
                   'Make sure no other app is using it.')
@@ -131,126 +183,128 @@ class GestureController:
         cap.set(cv2.CAP_PROP_FRAME_WIDTH,  320)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
         cap.set(cv2.CAP_PROP_FPS,          30)
-
         print('[Gesture] Camera opened. Detecting gestures...')
 
-        with mp_hands.Hands(
-                static_image_mode=False,
-                max_num_hands=1,
-                model_complexity=0,           # fastest model
-                min_detection_confidence=0.70,
-                min_tracking_confidence=0.60,
-        ) as hands:
+        try:
+            with mp_vision.HandLandmarker.create_from_options(options) as landmarker:
+                start_ns = time.monotonic_ns()
 
-            while not self._stop_event.is_set():
-                ret, frame = cap.read()
-                if not ret:
-                    time.sleep(0.05)
-                    continue
+                while not self._stop_event.is_set():
+                    ret, frame = cap.read()
+                    if not ret:
+                        time.sleep(0.05)
+                        continue
 
-                frame   = cv2.flip(frame, 1)                  # mirror effect
-                rgb     = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                results = hands.process(rgb)
+                    frame = cv2.flip(frame, 1)   # mirror effect
+                    rgb   = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-                gesture = None
-                if results.multi_hand_landmarks:
-                    hand_lm = results.multi_hand_landmarks[0]
+                    # Tasks API requires mp.Image and strictly increasing timestamps
+                    mp_image     = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+                    timestamp_ms = (time.monotonic_ns() - start_ns) // 1_000_000
+
+                    result  = landmarker.detect_for_video(mp_image, timestamp_ms)
+                    gesture = None
+
+                    if result.hand_landmarks:
+                        lm      = result.hand_landmarks[0]
+                        fingers = self._finger_states(lm)
+                        gesture = self._classify(fingers)
+
+                        if self._show_preview:
+                            self._draw_landmarks(cv2, frame, lm)
+
+                    self._debounce(gesture)
+
                     if self._show_preview:
-                        mp_draw.draw_landmarks(
-                            frame, hand_lm, mp_hands.HAND_CONNECTIONS)
-                    fingers = self._finger_states(hand_lm)
-                    gesture = self._classify(hand_lm, fingers)
+                        self._draw_overlay(cv2, frame, gesture)
+                        cv2.imshow('REHBAR Gesture Control  [Q to close]', frame)
+                        if cv2.waitKey(1) & 0xFF == ord('q'):
+                            break
 
-                self._debounce(gesture)
+        except Exception as e:
+            print(f'[Gesture] Runtime error: {e}')
+        finally:
+            cap.release()
+            if self._show_preview:
+                try:
+                    cv2.destroyAllWindows()
+                except Exception:
+                    pass
+            print('[Gesture] Camera released.')
 
-                if self._show_preview:
-                    self._draw_overlay(cv2, frame, gesture)
-                    cv2.imshow('REHBAR Gesture Control  [Q to close]', frame)
-                    if cv2.waitKey(1) & 0xFF == ord('q'):
-                        break
-
-        cap.release()
-        if self._show_preview:
-            cv2.destroyAllWindows()
-        print('[Gesture] Camera released.')
-
-    # ── Finger state detection ─────────────────────────────────────────────────
+    # ── Finger state detection ───────────────────────────────────────────────────
 
     @staticmethod
-    def _finger_states(hand_landmarks) -> list:
+    def _finger_states(landmarks) -> list:
         """
         Returns [thumb_up, index_up, middle_up, ring_up, pinky_up].
-        Uses y-coordinate comparison (smaller y = higher on screen in MediaPipe).
+        landmarks is a list of NormalizedLandmark (mediapipe.tasks API).
+        Smaller .y = higher on screen in normalized coordinates.
         """
-        lm = hand_landmarks.landmark
-
-        # Thumb: tip (4) above IP joint (3)
-        thumb_up = lm[4].y < lm[3].y
-
-        # Fingers: tip above PIP joint
+        lm = landmarks
+        thumb_up  = lm[4].y  < lm[3].y
         index_up  = lm[8].y  < lm[6].y
         middle_up = lm[12].y < lm[10].y
         ring_up   = lm[16].y < lm[14].y
         pinky_up  = lm[20].y < lm[18].y
-
         return [thumb_up, index_up, middle_up, ring_up, pinky_up]
 
-    # ── Gesture classification ─────────────────────────────────────────────────
+    # ── Gesture classification ───────────────────────────────────────────────────
 
     @staticmethod
-    def _classify(hand_landmarks, fingers) -> Optional[str]:
+    def _classify(fingers) -> Optional[str]:
         t, i, m, r, p = fingers
 
         # Order matters — most specific checks first
-
-        # Four Fingers (all except thumb) — check BEFORE Open Palm
-        if not t and i and m and r and p:
-            return 'FOUR_FINGERS'
-
-        # Open Palm — all five up
-        if t and i and m and r and p:
-            return 'OPEN_PALM'
-
-        # Fist — all closed
-        if not t and not i and not m and not r and not p:
-            return 'FIST'
-
-        # L-Shape — thumb + index, rest closed (check BEFORE THUMBS_UP)
-        if t and i and not m and not r and not p:
-            return 'L_SHAPE'
-
-        # Thumbs Up — only thumb
-        if t and not i and not m and not r and not p:
-            return 'THUMBS_UP'
-
-        # Three Fingers — index + middle + ring
-        if not t and i and m and r and not p:
-            return 'THREE_FINGERS'
-
-        # Peace / V — index + middle only
-        if not t and i and m and not r and not p:
-            return 'PEACE'
-
-        # Index Only
-        if not t and i and not m and not r and not p:
-            return 'INDEX_ONLY'
-
-        # Pinky Only
-        if not t and not i and not m and not r and p:
-            return 'PINKY_ONLY'
-
+        if not t and i and m and r and p:   return 'FOUR_FINGERS'  # before OPEN_PALM
+        if t and i and m and r and p:        return 'OPEN_PALM'
+        if not t and not i and not m and not r and not p: return 'FIST'
+        if t and i and not m and not r and not p:         return 'L_SHAPE'      # before THUMBS_UP
+        if t and not i and not m and not r and not p:     return 'THUMBS_UP'
+        if not t and i and m and r and not p:             return 'THREE_FINGERS'
+        if not t and i and m and not r and not p:         return 'PEACE'
+        if not t and i and not m and not r and not p:     return 'INDEX_ONLY'
+        if not t and not i and not m and not r and p:     return 'PINKY_ONLY'
         return None
 
-    # ── Debounce + cooldown ────────────────────────────────────────────────────
+    # ── Landmark drawing (no mp_draw in 0.10+) ───────────────────────────────────
+
+    @staticmethod
+    def _draw_landmarks(cv2_mod, frame, landmarks) -> None:
+        h, w = frame.shape[:2]
+        pts = [(int(lm.x * w), int(lm.y * h)) for lm in landmarks]
+        for a, b in _HAND_CONNECTIONS:
+            cv2_mod.line(frame, pts[a], pts[b], (0, 200, 100), 1, cv2_mod.LINE_AA)
+        for px, py in pts:
+            cv2_mod.circle(frame, (px, py), 3, (0, 255, 140), -1)
+
+    # ── Overlay drawing ──────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _draw_overlay(cv2_mod, frame, gesture: Optional[str]) -> None:
+        h, w = frame.shape[:2]
+        label  = GESTURE_LABELS.get(gesture, '') if gesture else ''
+        status = f'  {label}  ' if label else '  Waiting for gesture...'
+        color  = (0, 230, 110) if label else (120, 120, 120)
+
+        cv2_mod.rectangle(frame, (0, 0), (w, 32), (15, 15, 30), -1)
+        cv2_mod.putText(frame, f'REHBAR  |{status}',
+                        (6, 22), cv2_mod.FONT_HERSHEY_SIMPLEX, 0.55, color, 1,
+                        cv2_mod.LINE_AA)
+
+        hint = '  '.join(f'{k[:3]}:{v[:4]}' for k, v in list(GESTURE_LABELS.items())[:5])
+        cv2_mod.putText(frame, hint, (4, h - 6),
+                        cv2_mod.FONT_HERSHEY_SIMPLEX, 0.30, (90, 140, 200), 1,
+                        cv2_mod.LINE_AA)
+
+    # ── Debounce + cooldown ──────────────────────────────────────────────────────
 
     def _debounce(self, gesture: Optional[str]) -> None:
         if gesture:
             self._pending[gesture] = self._pending.get(gesture, 0) + 1
-            # Reset counters for all other gestures
             for g in list(self._pending):
                 if g != gesture:
                     self._pending[g] = 0
-
             if self._pending[gesture] >= CONFIRM_FRAMES:
                 now  = time.time()
                 last = self._last_trigger.get(gesture, 0.0)
@@ -261,72 +315,39 @@ class GestureController:
         else:
             self._pending.clear()
 
-    # ── Overlay drawing ────────────────────────────────────────────────────────
-
-    @staticmethod
-    def _draw_overlay(cv2, frame, gesture: Optional[str]) -> None:
-        import cv2 as _cv2
-        h, w = frame.shape[:2]
-
-        label  = GESTURE_LABELS.get(gesture, '') if gesture else ''
-        status = f'  {label}  ' if label else '  Waiting for gesture...'
-        color  = (0, 230, 110) if label else (120, 120, 120)
-
-        _cv2.rectangle(frame, (0, 0), (w, 32), (15, 15, 30), -1)
-        _cv2.putText(frame, f'REHBAR  |{status}',
-                     (6, 22), _cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 1,
-                     _cv2.LINE_AA)
-
-        hint = '  '.join(f'{k}:{v[:4]}' for k, v in list(GESTURE_LABELS.items())[:5])
-        _cv2.putText(frame, hint, (4, h - 6),
-                     _cv2.FONT_HERSHEY_SIMPLEX, 0.30, (90, 140, 200), 1,
-                     _cv2.LINE_AA)
-
-    # ── Action execution ───────────────────────────────────────────────────────
+    # ── Action execution ─────────────────────────────────────────────────────────
 
     def _execute(self, gesture: str) -> None:
         label = GESTURE_LABELS.get(gesture, gesture)
         print(f'[Gesture] ▶ {gesture}  ({label})')
-
         try:
-            if gesture == 'OPEN_PALM':
-                self._take_screenshot()
-
-            elif gesture == 'FIST':
-                self._toggle_widget()
-
+            if   gesture == 'OPEN_PALM':      self._take_screenshot()
+            elif gesture == 'FIST':           self._toggle_widget()
             elif gesture == 'THUMBS_UP':
                 for _ in range(VOLUME_STEPS):
                     self._pyag.press('volumeup')
                 print('[Gesture] Volume up.')
-
             elif gesture == 'PEACE':
                 self._pyag.press('playpause')
                 print('[Gesture] Play/Pause toggled.')
-
             elif gesture == 'INDEX_ONLY':
                 self._pyag.scroll(SCROLL_AMOUNT)
                 print('[Gesture] Scrolled up.')
-
             elif gesture == 'PINKY_ONLY':
                 self._pyag.scroll(-SCROLL_AMOUNT)
                 print('[Gesture] Scrolled down.')
-
             elif gesture == 'THREE_FINGERS':
                 self._pyag.press('nexttrack')
                 print('[Gesture] Next track.')
-
             elif gesture == 'FOUR_FINGERS':
                 self._pyag.press('prevtrack')
                 print('[Gesture] Previous track.')
-
             elif gesture == 'L_SHAPE':
                 self._activate_listening()
-
         except Exception as e:
             print(f'[Gesture] Action error ({gesture}): {e}')
 
-    # ── Individual actions ─────────────────────────────────────────────────────
+    # ── Individual actions ───────────────────────────────────────────────────────
 
     def _take_screenshot(self) -> None:
         try:
@@ -337,12 +358,11 @@ class GestureController:
             img   = self._pyag.screenshot()
             img.save(path)
             print(f'[Gesture] Screenshot saved: {path}')
-            self._speak(f'Screenshot saved to Desktop as {fname}')
+            self._speak(f'Screenshot saved to Desktop.')
         except Exception as e:
             print(f'[Gesture] Screenshot error: {e}')
 
     def _toggle_widget(self) -> None:
-        """Puts a GESTURE_TOGGLE_WIDGET intent into the command queue so Java handles it."""
         if self._command_queue is not None:
             try:
                 self._command_queue.put_nowait(
