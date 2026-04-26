@@ -160,11 +160,13 @@ class GestureController:
             return
 
         # ── Configure HandLandmarker ─────────────────────────────────────────────
+        # IMAGE mode is fully synchronous (no timestamp bookkeeping) and avoids
+        # the Windows threading executor hang that occurs with VIDEO mode.
         try:
             base_options = mp_tasks.BaseOptions(model_asset_path=model_path)
             options = mp_vision.HandLandmarkerOptions(
                 base_options=base_options,
-                running_mode=mp_vision.RunningMode.VIDEO,
+                running_mode=mp_vision.RunningMode.IMAGE,
                 num_hands=1,
                 min_hand_detection_confidence=0.70,
                 min_tracking_confidence=0.60,
@@ -187,7 +189,6 @@ class GestureController:
 
         try:
             with mp_vision.HandLandmarker.create_from_options(options) as landmarker:
-                start_ns = time.monotonic_ns()
 
                 while not self._stop_event.is_set():
                     ret, frame = cap.read()
@@ -195,14 +196,12 @@ class GestureController:
                         time.sleep(0.05)
                         continue
 
-                    frame = cv2.flip(frame, 1)   # mirror effect
-                    rgb   = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    frame    = cv2.flip(frame, 1)   # mirror effect
+                    rgb      = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
 
-                    # Tasks API requires mp.Image and strictly increasing timestamps
-                    mp_image     = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-                    timestamp_ms = (time.monotonic_ns() - start_ns) // 1_000_000
-
-                    result  = landmarker.detect_for_video(mp_image, timestamp_ms)
+                    # IMAGE mode: simple synchronous detect(), no timestamp needed
+                    result  = landmarker.detect(mp_image)
                     gesture = None
 
                     if result.hand_landmarks:

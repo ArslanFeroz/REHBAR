@@ -176,10 +176,12 @@ def run_test(show_ui: bool = True):
         sys.exit(1)
 
     # ── Build landmarker ────────────────────────────────────────────────────────
+    # IMAGE mode: fully synchronous, no timestamp bookkeeping, no Windows
+    # executor-hang issue that VIDEO mode causes.
     base_options = mp_tasks.BaseOptions(model_asset_path=model_path)
     options = mp_vision.HandLandmarkerOptions(
         base_options=base_options,
-        running_mode=mp_vision.RunningMode.VIDEO,
+        running_mode=mp_vision.RunningMode.IMAGE,
         num_hands=1,
         min_hand_detection_confidence=0.70,
         min_tracking_confidence=0.60,
@@ -211,79 +213,87 @@ def run_test(show_ui: bool = True):
     frame_count    = 0
     fps_timer      = time.monotonic()
     fps            = 0.0
-    start_ns       = time.monotonic_ns()
     finger_states  = [False] * 5
 
-    with mp_vision.HandLandmarker.create_from_options(options) as landmarker:
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                time.sleep(0.05)
-                continue
+    try:
+        with mp_vision.HandLandmarker.create_from_options(options) as landmarker:
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    time.sleep(0.05)
+                    continue
 
-            frame       = cv2.flip(frame, 1)
-            rgb         = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            mp_image    = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-            ts_ms       = (time.monotonic_ns() - start_ns) // 1_000_000
-            result      = landmarker.detect_for_video(mp_image, ts_ms)
+                frame    = cv2.flip(frame, 1)
+                rgb      = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+                result   = landmarker.detect(mp_image)   # IMAGE mode: synchronous
 
-            gesture = None
-            if result.hand_landmarks:
-                lm            = result.hand_landmarks[0]
-                finger_states = _finger_states(lm)
-                gesture       = _classify(finger_states)
-                if show_ui:
-                    _draw_landmarks(cv2, frame, lm)
-            else:
-                finger_states = [False] * 5
+                gesture = None
+                if result.hand_landmarks:
+                    lm            = result.hand_landmarks[0]
+                    finger_states = _finger_states(lm)
+                    gesture       = _classify(finger_states)
+                    if show_ui:
+                        _draw_landmarks(cv2, frame, lm)
+                else:
+                    finger_states = [False] * 5
 
-            # ── Debounce ──────────────────────────────────────────────────────
-            if gesture:
-                pending[gesture] = pending.get(gesture, 0) + 1
-                for g in list(pending):
-                    if g != gesture:
-                        pending[g] = 0
-
-                if pending[gesture] >= CONFIRM_FRAMES:
-                    now  = time.monotonic()
-                    last = last_trigger.get(gesture, 0.0)
-                    if now - last >= GESTURE_COOLDOWN:
-                        last_trigger[gesture] = now
-                        pending[gesture]      = 0
-                        emoji, action         = GESTURE_LABELS.get(gesture, ('?', gesture))
-                        ts_str = time.strftime('%H:%M:%S')
-                        entry  = f'{ts_str}  {emoji}  {action}'
-                        action_log.appendleft(entry)
-                        print(f'[{ts_str}] TRIGGERED: {gesture} → {action}')
-            else:
-                pending.clear()
-
-            # ── FPS counter ───────────────────────────────────────────────────
-            frame_count += 1
-            elapsed = time.monotonic() - fps_timer
-            if elapsed >= 1.0:
-                fps       = frame_count / elapsed
-                frame_count = 0
-                fps_timer = time.monotonic()
-
-            # ── Draw UI ───────────────────────────────────────────────────────
-            if show_ui:
-                _draw_ui(cv2, frame, gesture,
-                         pending.get(gesture, 0) if gesture else 0,
-                         action_log, fps, finger_states)
-                cv2.imshow('REHBAR Gesture Test  [Q to quit]', frame)
-                key = cv2.waitKey(1) & 0xFF
-                if key == ord('q') or key == 27:
-                    break
-            else:
-                # Headless — just print when something is detected
+                # ── Debounce ──────────────────────────────────────────────────
                 if gesture:
-                    sys.stdout.write(f'\r  Detecting: {gesture:<16}  frames: {pending.get(gesture,0)}/{CONFIRM_FRAMES}  ')
-                    sys.stdout.flush()
+                    pending[gesture] = pending.get(gesture, 0) + 1
+                    for g in list(pending):
+                        if g != gesture:
+                            pending[g] = 0
 
-    cap.release()
-    if show_ui:
-        cv2.destroyAllWindows()
+                    if pending[gesture] >= CONFIRM_FRAMES:
+                        now  = time.monotonic()
+                        last = last_trigger.get(gesture, 0.0)
+                        if now - last >= GESTURE_COOLDOWN:
+                            last_trigger[gesture] = now
+                            pending[gesture]      = 0
+                            emoji, action         = GESTURE_LABELS.get(gesture, ('?', gesture))
+                            ts_str = time.strftime('%H:%M:%S')
+                            entry  = f'{ts_str}  {emoji}  {action}'
+                            action_log.appendleft(entry)
+                            print(f'[{ts_str}] TRIGGERED: {gesture} → {action}')
+                else:
+                    pending.clear()
+
+                # ── FPS counter ───────────────────────────────────────────────
+                frame_count += 1
+                elapsed = time.monotonic() - fps_timer
+                if elapsed >= 1.0:
+                    fps         = frame_count / elapsed
+                    frame_count = 0
+                    fps_timer   = time.monotonic()
+
+                # ── Draw UI ───────────────────────────────────────────────────
+                if show_ui:
+                    _draw_ui(cv2, frame, gesture,
+                             pending.get(gesture, 0) if gesture else 0,
+                             action_log, fps, finger_states)
+                    cv2.imshow('REHBAR Gesture Test  [Q to quit]', frame)
+                    key = cv2.waitKey(1) & 0xFF
+                    if key == ord('q') or key == 27:
+                        break
+                else:
+                    if gesture:
+                        sys.stdout.write(
+                            f'\r  Detecting: {gesture:<16}  '
+                            f'frames: {pending.get(gesture,0)}/{CONFIRM_FRAMES}  ')
+                        sys.stdout.flush()
+
+    except KeyboardInterrupt:
+        print('\nInterrupted.')
+    except Exception as e:
+        print(f'\nERROR: {e}')
+    finally:
+        cap.release()
+        if show_ui:
+            try:
+                cv2.destroyAllWindows()
+            except Exception:
+                pass
 
     # ── Summary ──────────────────────────────────────────────────────────────
     print('\n\nSession Summary')
