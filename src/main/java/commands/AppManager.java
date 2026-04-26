@@ -1,9 +1,11 @@
 package commands;
 
 import db.DatabaseManager;
+import java.awt.Desktop;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.IOException;
+import java.net.URI;
 
 /**
  * AppManager -- opens and closes desktop applications.
@@ -30,24 +32,41 @@ public class AppManager {
             return "Please tell me which application you want to open.";
         }
 
+        // ── 1. App registry ───────────────────────────────────────────────────
         String path = DatabaseManager.getInstance().getAppPath(appName);
-        if (path == null) {
-            return "I don't have '" + appName + "' in my app registry. " +
-                    "You can register it in the database.";
+        if (path != null) {
+            java.io.File exeFile = new java.io.File(path);
+            if (!exeFile.exists()) {
+                return "The executable for '" + appName + "' was not found at: " + path +
+                        ". Please update its path in the Registry panel.";
+            }
+            try {
+                new ProcessBuilder(path).start();
+                return "Opening " + appName + ".";
+            } catch (IOException e) {
+                return "Could not open '" + appName + "'. Check that you have permission to run it.";
+            }
         }
 
-        java.io.File exeFile = new java.io.File(path);
-        if (!exeFile.exists()) {
-            return "The executable for '" + appName + "' was not found at: " + path +
-                    ". Please update its path in the registry.";
+        // ── 2. Website registry fallback ──────────────────────────────────────
+        // Handles the case where the user says "open flex" but "flex" is stored
+        // as a website alias (intent classifier can't know which registry to use).
+        String url = DatabaseManager.getInstance().getWebsiteUrl(appName);
+        if (url != null) {
+            if (!Desktop.isDesktopSupported()) {
+                return "Cannot open a browser — desktop mode is not available.";
+            }
+            try {
+                Desktop.getDesktop().browse(new URI(url));
+                return "Opening " + appName + ".";
+            } catch (Exception e) {
+                return "Could not open '" + appName + "' in the browser.";
+            }
         }
 
-        try {
-            new ProcessBuilder(path).start();
-            return "Opening " + appName + ".";
-        } catch (IOException e) {
-            return "Could not open '" + appName + "'. Check that you have permission to run it.";
-        }
+        // ── 3. Not found in either registry ───────────────────────────────────
+        return "I don't have '" + appName + "' in my registry. " +
+                "Add it in the Registry panel and I'll be able to open it.";
     }
 
     // ── Close ─────────────────────────────────────────────────────────────────

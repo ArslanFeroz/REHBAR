@@ -44,12 +44,28 @@ public class WebManager {
             return "Which website would you like me to open?";
         }
 
-        // DB lookup first
+        // ── 1. Website registry lookup ────────────────────────────────────────
         String url = DatabaseManager.getInstance().getWebsiteUrl(siteName);
         if (url != null) {
             return openUrl(url, "Opening " + siteName);
         }
 
+        // ── 2. App registry fallback ──────────────────────────────────────────
+        // If "go to flex" is said but "flex" is actually an app alias, launch it.
+        String appPath = DatabaseManager.getInstance().getAppPath(siteName);
+        if (appPath != null) {
+            java.io.File exe = new java.io.File(appPath);
+            if (exe.exists()) {
+                try {
+                    new ProcessBuilder(appPath).start();
+                    return "Opening " + siteName + ".";
+                } catch (Exception e) {
+                    return "Could not open '" + siteName + "'.";
+                }
+            }
+        }
+
+        // ── 3. No registry match — synthesise or search ───────────────────────
         // If the site name still has spaces, fall back to a Google search
         // to avoid building a broken URL like "https://go to youtube.com"
         if (siteName.contains(" ")) {
@@ -58,7 +74,7 @@ public class WebManager {
             return openUrl(searchUrl, "Searching for " + siteName);
         }
 
-        // Single word -- try https://<name>.com
+        // Single word — try https://<name>.com
         return openUrl("https://" + siteName + ".com", "Opening " + siteName);
     }
 
