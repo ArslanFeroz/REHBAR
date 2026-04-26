@@ -2,20 +2,23 @@
 gestures.py  --  Rehbar Gesture Detection Test
 
 Standalone test — shows webcam feed with real-time gesture detection.
-Does NOT trigger real system actions. Press Q to quit.
+Does NOT trigger real system actions. Press Q or ESC to quit.
 
 Usage:
-    python gestures.py           # with UI (recommended)
-    python gestures.py --no-ui   # headless print-only
+    python gestures.py           # with camera UI (recommended)
+    python gestures.py --no-ui   # headless print-only mode
 
-Active gestures:
-    ✋  OPEN_PALM      (all 5 up)             → Screenshot
-    👍  THUMBS_UP      (thumb only)           → Volume Up
-    ✊  FIST           (all closed)           → Volume Down
-    ✌️  PEACE          (index + middle)        → Zoom In
-    🤟  THREE_FINGERS  (index+middle+ring)     → Zoom Out
-    🖖  FOUR_FINGERS   (all except thumb)     → Next Tab
-    🤙  PINKY_ONLY     (pinky only)           → Prev Tab
+────────────────────────────────────────────────────────
+ Gesture         How to do it                  Action
+────────────────────────────────────────────────────────
+ Open Palm ✋    All 5 fingers spread wide      Screenshot
+ Thumbs Up 👍   Thumb out, fist closed         Volume Up
+ Fist      ✊   All fingers curled in           Volume Down
+ Pinch Out 🤏→  Touch thumb+index, spread out  Zoom In
+ Pinch In  🤏←  Spread thumb+index, close in   Zoom Out
+ Swipe →        Slap/swipe hand to the RIGHT   Next Tab
+ Swipe ←        Slap/swipe hand to the LEFT    Prev Tab
+────────────────────────────────────────────────────────
 """
 
 import os
@@ -25,7 +28,7 @@ import urllib.request
 from collections import deque, Counter
 from typing import Optional
 
-# ── Config ─────────────────────────────────────────────────────────────────────
+# ── Config (must match gesture_controller.py) ───────────────────────────────────
 _APPDATA    = os.getenv('APPDATA', os.path.expanduser('~'))
 _MODEL_DIR  = os.path.join(_APPDATA, 'RAHBAR')
 _MODEL_PATH = os.path.join(_MODEL_DIR, 'hand_landmarker.task')
@@ -34,20 +37,17 @@ _MODEL_URL  = (
     'hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task'
 )
 
-CONFIRM_FRAMES   = 8
-GESTURE_COOLDOWN = 2.0
-THUMB_MARGIN     = 0.04
-
-# (emoji, action label)
-GESTURE_INFO = {
-    'OPEN_PALM':     ('✋', 'Screenshot',       'All 5 fingers up'),
-    'THUMBS_UP':     ('👍', 'Volume Up',         'Thumb only, rest closed'),
-    'FIST':          ('✊', 'Volume Down',        'All fingers closed'),
-    'PEACE':         ('✌️', 'Zoom In  (Ctrl +)', 'Index + middle only'),
-    'THREE_FINGERS': ('🤟', 'Zoom Out (Ctrl -)', 'Index + middle + ring'),
-    'FOUR_FINGERS':  ('🖖', 'Next Tab',          'All except thumb'),
-    'PINKY_ONLY':    ('🤙', 'Prev Tab',          'Pinky only'),
-}
+STATIC_CONFIRM    = 8
+STATIC_COOLDOWN   = 2.0
+THUMB_MARGIN      = 0.04
+SWIPE_FRAMES      = 10
+SWIPE_THRESHOLD   = 0.22
+SWIPE_CONSISTENCY = 0.60
+PINCH_FRAMES      = 18
+PINCH_THRESHOLD   = 0.09
+PINCH_MAX_START   = 0.18
+PINCH_MIN_END     = 0.02
+MOTION_COOLDOWN   = 28
 
 _HAND_CONNECTIONS = [
     (0,1),(1,2),(2,3),(3,4),
@@ -58,6 +58,19 @@ _HAND_CONNECTIONS = [
     (5,9),(9,13),(13,17),
 ]
 
+# (emoji, action, description)
+GESTURE_INFO = {
+    'OPEN_PALM':   ('✋', 'Screenshot',  'All 5 fingers up'),
+    'THUMBS_UP':   ('👍', 'Volume Up',   'Thumb only, rest closed'),
+    'FIST':        ('✊', 'Volume Down',  'All fingers curled'),
+    'ZOOM_IN':     ('🤏', 'Zoom In',     'Pinch then spread fingers'),
+    'ZOOM_OUT':    ('🤏', 'Zoom Out',    'Spread then pinch fingers'),
+    'SWIPE_RIGHT': ('→',  'Next Tab',    'Slap/swipe hand to the right'),
+    'SWIPE_LEFT':  ('←',  'Prev Tab',    'Slap/swipe hand to the left'),
+}
+
+
+# ── Model download ──────────────────────────────────────────────────────────────
 
 def _ensure_model() -> Optional[str]:
     if os.path.exists(_MODEL_PATH):
@@ -70,7 +83,7 @@ def _ensure_model() -> Optional[str]:
             sys.stdout.write(f'\r  {pct:3d}%')
             sys.stdout.flush()
         urllib.request.urlretrieve(_MODEL_URL, _MODEL_PATH, _prog)
-        print(f'\nDone.')
+        print('\nDone.')
         return _MODEL_PATH
     except Exception as e:
         print(f'\nERROR: {e}')
@@ -79,38 +92,32 @@ def _ensure_model() -> Optional[str]:
         return None
 
 
-def _dist(a, b) -> float:
-    return ((a.x - b.x) ** 2 + (a.y - b.y) ** 2) ** 0.5
-
+# ── Detection helpers ───────────────────────────────────────────────────────────
 
 def _finger_states(lm) -> list:
-    """
-    [thumb_up, index_up, middle_up, ring_up, pinky_up]
-
-    Thumb: distance-from-wrist method (works for any hand orientation).
-    Others: tip.y < pip.y (tip above PIP joint in normalised coords).
-    """
-    wrist    = lm[0]
-    thumb_up = _dist(lm[4], wrist) > _dist(lm[3], wrist) + THUMB_MARGIN
+    def _d(a, b):
+        return ((a.x - b.x)**2 + (a.y - b.y)**2)**0.5
     return [
-        thumb_up,
-        lm[8].y  < lm[6].y,
-        lm[12].y < lm[10].y,
-        lm[16].y < lm[14].y,
-        lm[20].y < lm[18].y,
+        _d(lm[4], lm[0]) > _d(lm[3], lm[0]) + THUMB_MARGIN,  # thumb (distance method)
+        lm[8].y  < lm[6].y,   # index
+        lm[12].y < lm[10].y,  # middle
+        lm[16].y < lm[14].y,  # ring
+        lm[20].y < lm[18].y,  # pinky
     ]
 
 
-def _classify(fingers) -> Optional[str]:
+def _classify_static(fingers) -> Optional[str]:
     t, i, m, r, p = fingers
     if t and i and m and r and p:                 return 'OPEN_PALM'
-    if not t and i and m and r and p:             return 'FOUR_FINGERS'
     if not any([t, i, m, r, p]):                  return 'FIST'
     if t and not i and not m and not r and not p: return 'THUMBS_UP'
-    if not t and i and m and r and not p:         return 'THREE_FINGERS'
-    if not t and i and m and not r and not p:     return 'PEACE'
-    if not t and not i and not m and not r and p: return 'PINKY_ONLY'
     return None
+
+
+def _pinch_dist(lm) -> float:
+    dx = lm[4].x - lm[8].x
+    dy = lm[4].y - lm[8].y
+    return (dx*dx + dy*dy)**0.5
 
 
 def _draw_landmarks(cv2, frame, lm) -> None:
@@ -122,52 +129,102 @@ def _draw_landmarks(cv2, frame, lm) -> None:
         cv2.circle(frame, (px, py), 4, (0, 255, 140), -1)
 
 
-def _draw_ui(cv2, frame, gesture, pending_count, log, fps, fs) -> None:
+# ── Test UI overlay ─────────────────────────────────────────────────────────────
+
+def _draw_ui(cv2, frame, gesture, static_pending, log, fps, fs,
+             pinch_d, swipe_dx, wrist_trail, motion_cooling) -> None:
     h, w = frame.shape[:2]
 
+    # ── Wrist trail (swipe visualiser) ─────────────────────────────────────────
+    if len(wrist_trail) > 1:
+        trail_pts = [(int(x * w), h // 2) for x in wrist_trail]
+        for i in range(1, len(trail_pts)):
+            alpha = int(180 * i / len(trail_pts))
+            cv2.line(frame, trail_pts[i-1], trail_pts[i], (alpha, alpha, 255), 2)
+        # Arrow tip
+        cv2.arrowedLine(frame, trail_pts[-2], trail_pts[-1],
+                        (80, 160, 255), 2, tipLength=0.4)
+
     # ── Top bar ────────────────────────────────────────────────────────────────
-    cv2.rectangle(frame, (0, 0), (w, 34), (15, 15, 30), -1)
+    cv2.rectangle(frame, (0, 0), (w, 36), (15, 15, 30), -1)
     if gesture:
         emoji, action, _ = GESTURE_INFO.get(gesture, ('?', gesture, ''))
-        label = f'  {action}  '
-        color = (0, 230, 110)
+        bar_text = f'  {emoji}  {action}  '
+        bar_color = (0, 230, 110)
     else:
-        label, color = '  Waiting for gesture...  ', (120, 120, 120)
-    cv2.putText(frame, f'REHBAR |{label}',
-                (6, 23), cv2.FONT_HERSHEY_SIMPLEX, 0.54, color, 1, cv2.LINE_AA)
+        bar_text  = '  Waiting for gesture...'
+        bar_color = (120, 120, 120)
+    cv2.putText(frame, f'REHBAR |{bar_text}',
+                (6, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.55, bar_color, 1, cv2.LINE_AA)
 
-    # ── Confirm progress bar ───────────────────────────────────────────────────
-    bar_w = int(w * min(pending_count, CONFIRM_FRAMES) / CONFIRM_FRAMES)
-    if bar_w > 0:
-        cv2.rectangle(frame, (0, 34), (bar_w, 40), (0, 210, 120), -1)
-    cv2.rectangle(frame, (0, 34), (w, 40), (40, 40, 60), 1)
+    # ── Static confirm bar (fills as you hold a static pose) ───────────────────
+    bar_fill = int(w * min(static_pending, STATIC_CONFIRM) / STATIC_CONFIRM)
+    if bar_fill > 0:
+        cv2.rectangle(frame, (0, 36), (bar_fill, 42), (0, 210, 120), -1)
+    cv2.rectangle(frame, (0, 36), (w, 42), (35, 35, 55), 1)
 
-    # ── Finger state boxes  T  I  M  R  P ──────────────────────────────────────
-    labels = ['T', 'I', 'M', 'R', 'P']
-    bx = w - 94
-    for idx, (name, state) in enumerate(zip(labels, fs)):
-        clr = (0, 220, 100) if state else (60, 60, 80)
-        cv2.rectangle(frame, (bx + idx*17, 44), (bx + idx*17 + 14, 60), clr, -1)
-        cv2.putText(frame, name, (bx + idx*17 + 3, 57),
+    # ── Finger boxes [T][I][M][R][P] ───────────────────────────────────────────
+    lbl  = ['T', 'I', 'M', 'R', 'P']
+    bx   = w - 96
+    for idx, (name, up) in enumerate(zip(lbl, fs)):
+        clr = (0, 210, 100) if up else (55, 55, 75)
+        cv2.rectangle(frame, (bx + idx*18, 46), (bx + idx*18 + 14, 62), clr, -1)
+        cv2.putText(frame, name, (bx + idx*18 + 3, 59),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.30, (0, 0, 0), 1)
 
     # ── FPS ────────────────────────────────────────────────────────────────────
-    cv2.putText(frame, f'FPS {fps:.0f}', (6, 56),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.36, (100, 150, 220), 1)
+    cv2.putText(frame, f'{fps:.0f} fps', (6, 58),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.35, (90, 140, 210), 1)
+
+    # ── Cooldown indicator ──────────────────────────────────────────────────────
+    if motion_cooling > 0:
+        cv2.putText(frame, f'cooldown {motion_cooling}f',
+                    (bx - 70, 58), cv2.FONT_HERSHEY_SIMPLEX, 0.30, (180, 100, 60), 1)
+
+    # ── Pinch meter ─────────────────────────────────────────────────────────────
+    # Shows current thumb-to-index distance as a horizontal bar
+    meter_y  = 70
+    meter_w  = w - 12
+    meter_d  = min(1.0, pinch_d / 0.30)   # normalise: 0.30 = fully spread
+    fill_px  = int(meter_w * meter_d)
+    cv2.rectangle(frame, (6, meter_y), (6 + meter_w, meter_y + 8), (30, 30, 50), -1)
+    cv2.rectangle(frame, (6, meter_y), (6 + fill_px,  meter_y + 8), (60, 200, 255), -1)
+    cv2.putText(frame, f'Pinch {pinch_d:.3f}',
+                (6, meter_y + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.30, (60, 180, 230), 1)
+    # threshold markers
+    lo = int(meter_w * PINCH_MIN_END  / 0.30)
+    hi = int(meter_w * PINCH_MAX_START / 0.30)
+    cv2.line(frame, (6 + lo, meter_y), (6 + lo, meter_y + 8), (255, 80, 80), 1)
+    cv2.line(frame, (6 + hi, meter_y), (6 + hi, meter_y + 8), (255, 200, 80), 1)
+
+    # ── Swipe displacement meter ────────────────────────────────────────────────
+    cx       = w // 2
+    swipe_y  = meter_y + 30
+    cv2.line(frame, (cx, swipe_y - 4), (cx, swipe_y + 4), (80, 80, 120), 1)
+    disp_px  = int(swipe_dx * w * 1.2)   # scale for visibility
+    end_x    = max(0, min(w, cx + disp_px))
+    clr_sw   = (80, 200, 255) if disp_px > 0 else (255, 130, 80)
+    cv2.arrowedLine(frame, (cx, swipe_y), (end_x, swipe_y), clr_sw, 2, tipLength=0.3)
+    thr_px   = int(SWIPE_THRESHOLD * w * 1.2)
+    cv2.line(frame, (cx - thr_px, swipe_y - 3), (cx - thr_px, swipe_y + 3), (200, 80, 80), 1)
+    cv2.line(frame, (cx + thr_px, swipe_y - 3), (cx + thr_px, swipe_y + 3), (80, 200, 80), 1)
+    cv2.putText(frame, f'Swipe dx {swipe_dx:+.3f}',
+                (6, swipe_y + 14), cv2.FONT_HERSHEY_SIMPLEX, 0.30, (80, 170, 220), 1)
 
     # ── Action log ─────────────────────────────────────────────────────────────
-    cv2.rectangle(frame, (0, h - 82), (w, h), (15, 15, 30), -1)
-    cv2.putText(frame, 'Log:', (6, h - 68),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.33, (130, 130, 190), 1)
-    for k, entry in enumerate(list(log)[:5]):
-        grey = max(80, 220 - k * 32)
-        cv2.putText(frame, entry, (6, h - 56 + k * 13),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.31, (grey, grey, grey), 1)
+    log_y0 = h - 64
+    cv2.rectangle(frame, (0, log_y0 - 10), (w, h), (15, 15, 30), -1)
+    cv2.putText(frame, 'Log:', (6, log_y0),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.30, (120, 120, 180), 1)
+    for k, entry in enumerate(list(log)[:4]):
+        grey = max(70, 210 - k * 40)
+        cv2.putText(frame, entry, (6, log_y0 + 12 + k * 13),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.30, (grey, grey, grey), 1)
 
-    # ── Quick cheat sheet ──────────────────────────────────────────────────────
-    tips = 'Palm=Scr  Up=Vol+  Fist=Vol-  V=Zoom+  3=Zoom-  4=NxtTab  Pnk=PrvTab'
-    cv2.putText(frame, tips, (4, h - 3),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.25, (70, 110, 170), 1)
+    # ── Cheat sheet ────────────────────────────────────────────────────────────
+    cv2.putText(frame,
+                'Palm=Scr  Up=Vol+  Fist=Vol-  PinchOut=Zoom+  PinchIn=Zoom-  →=NxtTab  ←=PrvTab',
+                (4, h - 3), cv2.FONT_HERSHEY_SIMPLEX, 0.24, (60, 100, 160), 1)
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
@@ -205,25 +262,36 @@ def run_test(show_ui: bool = True) -> None:
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
     cap.set(cv2.CAP_PROP_FPS,          30)
 
-    # ── Print guide ────────────────────────────────────────────────────────────
-    print('\n' + '=' * 62)
+    print('\n' + '=' * 64)
     print('  REHBAR Gesture Detection Test')
-    print('=' * 62)
-    print('  Press Q (or ESC) to quit\n')
-    print(f'  {"Gesture":<16}  {"Emoji"}  {"Action":<22}  Shape')
-    print('  ' + '-' * 58)
-    for key, (emoji, action, shape) in GESTURE_INFO.items():
-        print(f'  {key:<16}  {emoji}      {action:<22}  {shape}')
-    print('=' * 62 + '\n')
+    print('=' * 64)
+    print('  Press Q or ESC to quit\n')
+    print(f'  {"Gesture":<14}  {"Emoji"}  {"Action":<20}  How to do it')
+    print('  ' + '-' * 60)
+    for key, (emoji, action, desc) in GESTURE_INFO.items():
+        print(f'  {key:<14}  {emoji}      {action:<20}  {desc}')
+    print('=' * 64 + '\n')
 
     # ── State ──────────────────────────────────────────────────────────────────
-    pending:      dict  = {}
-    last_trigger: dict  = {}
-    action_log:   deque = deque(maxlen=5)
-    frame_count   = 0
-    fps_timer     = time.monotonic()
-    fps           = 0.0
-    fs            = [False] * 5
+    static_pending: dict  = {}
+    static_trigger: dict  = {}
+    wrist_x_buf:    deque = deque(maxlen=SWIPE_FRAMES)
+    pinch_d_buf:    deque = deque(maxlen=PINCH_FRAMES)
+    motion_cd       = 0    # frames remaining in motion cooldown
+    action_log:     deque = deque(maxlen=4)
+    frame_count     = 0
+    fps_timer       = time.monotonic()
+    fps             = 0.0
+    fs              = [False] * 5
+    pinch_d         = 0.0
+    swipe_dx        = 0.0
+
+    def _log_trigger(gesture: str) -> None:
+        emoji, action, _ = GESTURE_INFO.get(gesture, ('?', gesture, ''))
+        ts    = time.strftime('%H:%M:%S')
+        entry = f'{ts} {emoji} {action}'
+        action_log.appendleft(entry)
+        print(f'[{ts}] TRIGGERED: {gesture:<14} → {action}')
 
     try:
         with mp_vision.HandLandmarker.create_from_options(options) as landmarker:
@@ -238,35 +306,122 @@ def run_test(show_ui: bool = True) -> None:
                 mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
                 result   = landmarker.detect(mp_image)
 
-                gesture = None
-                if result.hand_landmarks:
-                    lm      = result.hand_landmarks[0]
-                    fs      = _finger_states(lm)
-                    gesture = _classify(fs)
-                    if show_ui:
-                        _draw_landmarks(cv2, frame, lm)
-                else:
-                    fs = [False] * 5
+                lm = result.hand_landmarks[0] if result.hand_landmarks else None
 
-                # ── Debounce ──────────────────────────────────────────────────
-                if gesture:
-                    pending[gesture] = pending.get(gesture, 0) + 1
-                    for g in list(pending):
-                        if g != gesture:
-                            pending[g] = 0
-                    if pending[gesture] >= CONFIRM_FRAMES:
-                        now  = time.monotonic()
-                        last = last_trigger.get(gesture, 0.0)
-                        if now - last >= GESTURE_COOLDOWN:
-                            last_trigger[gesture] = now
-                            pending[gesture]      = 0
-                            emoji, action, _      = GESTURE_INFO[gesture]
-                            ts    = time.strftime('%H:%M:%S')
-                            entry = f'{ts}  {emoji}  {action}'
-                            action_log.appendleft(entry)
-                            print(f'[{ts}] TRIGGERED: {gesture:<16} → {action}')
+                triggered_gesture = None
+
+                # ── Motion detection ──────────────────────────────────────────
+                if lm:
+                    pinch_d = _pinch_dist(lm)
+                    fs      = _finger_states(lm)
+
+                    if motion_cd > 0:
+                        motion_cd -= 1
+                        wrist_x_buf.append(lm[0].x)
+                        pinch_d_buf.append(pinch_d)
+                    else:
+                        wrist_x_buf.append(lm[0].x)
+                        pinch_d_buf.append(pinch_d)
+
+                        # ── Swipe check ───────────────────────────────────────
+                        if len(wrist_x_buf) >= SWIPE_FRAMES:
+                            xs = list(wrist_x_buf)
+                            dx = xs[-1] - xs[0]
+                            swipe_dx = dx
+                            if abs(dx) >= SWIPE_THRESHOLD:
+                                sign = 1 if dx > 0 else -1
+                                ok = sum(
+                                    1 for i in range(len(xs)-1)
+                                    if (xs[i+1]-xs[i])*sign >= 0
+                                )
+                                if ok >= (len(xs)-1) * SWIPE_CONSISTENCY:
+                                    triggered_gesture = 'SWIPE_RIGHT' if dx > 0 else 'SWIPE_LEFT'
+                                    motion_cd = MOTION_COOLDOWN
+                                    wrist_x_buf.clear()
+                                    static_pending.clear()
+                        else:
+                            swipe_dx = 0.0
+
+                        # ── Pinch check ───────────────────────────────────────
+                        if triggered_gesture is None and len(pinch_d_buf) >= PINCH_FRAMES:
+                            if lm[8].y < lm[5].y:   # index at least somewhat up
+                                ds    = list(pinch_d_buf)
+                                q     = max(2, len(ds) // 4)
+                                d_old = sum(ds[:q]) / q
+                                d_new = sum(ds[-q:]) / q
+                                delta = d_new - d_old
+                                if delta > PINCH_THRESHOLD and d_old < PINCH_MAX_START:
+                                    triggered_gesture = 'ZOOM_IN'
+                                    motion_cd = MOTION_COOLDOWN
+                                    pinch_d_buf.clear()
+                                    static_pending.clear()
+                                elif delta < -PINCH_THRESHOLD and d_new > PINCH_MIN_END:
+                                    triggered_gesture = 'ZOOM_OUT'
+                                    motion_cd = MOTION_COOLDOWN
+                                    pinch_d_buf.clear()
+                                    static_pending.clear()
+
                 else:
-                    pending.clear()
+                    # No hand — reset all tracking
+                    wrist_x_buf.clear()
+                    pinch_d_buf.clear()
+                    static_pending.clear()
+                    fs      = [False] * 5
+                    pinch_d = 0.0
+                    swipe_dx = 0.0
+
+                # ── Static pose debounce (only when motion not cooling) ────────
+                if triggered_gesture is None and motion_cd == 0 and lm:
+                    static = _classify_static(fs)
+                    if static:
+                        static_pending[static] = static_pending.get(static, 0) + 1
+                        for g in list(static_pending):
+                            if g != static:
+                                static_pending[g] = 0
+                        if static_pending[static] >= STATIC_CONFIRM:
+                            now  = time.monotonic()
+                            last = static_trigger.get(static, 0.0)
+                            if now - last >= STATIC_COOLDOWN:
+                                static_trigger[static] = now
+                                static_pending[static] = 0
+                                triggered_gesture = static
+                    else:
+                        static_pending.clear()
+
+                if triggered_gesture:
+                    _log_trigger(triggered_gesture)
+
+                # ── Draw ──────────────────────────────────────────────────────
+                if show_ui:
+                    if lm:
+                        _draw_landmarks(cv2, frame, lm)
+
+                    # Best static pending count for the confirm bar
+                    best_pending = max(static_pending.values()) if static_pending else 0
+
+                    _draw_ui(
+                        cv2, frame,
+                        triggered_gesture,
+                        best_pending,
+                        action_log,
+                        fps,
+                        fs,
+                        pinch_d,
+                        swipe_dx,
+                        list(wrist_x_buf),
+                        motion_cd,
+                    )
+                    cv2.imshow('REHBAR Gesture Test  [Q / ESC to quit]', frame)
+                    key = cv2.waitKey(1) & 0xFF
+                    if key in (ord('q'), 27):
+                        break
+                else:
+                    if lm:
+                        f_str = ''.join('1' if x else '0' for x in fs)
+                        sys.stdout.write(
+                            f'\r  [{f_str}] pd={pinch_d:.3f}  dx={swipe_dx:+.3f}  '
+                            f'cd={motion_cd:2d}  ')
+                        sys.stdout.flush()
 
                 # ── FPS ───────────────────────────────────────────────────────
                 frame_count += 1
@@ -275,27 +430,10 @@ def run_test(show_ui: bool = True) -> None:
                     frame_count = 0
                     fps_timer   = time.monotonic()
 
-                # ── Display ───────────────────────────────────────────────────
-                if show_ui:
-                    _draw_ui(cv2, frame, gesture,
-                             pending.get(gesture, 0) if gesture else 0,
-                             action_log, fps, fs)
-                    cv2.imshow('REHBAR Gesture Test  [Q / ESC to quit]', frame)
-                    key = cv2.waitKey(1) & 0xFF
-                    if key in (ord('q'), 27):
-                        break
-                else:
-                    if gesture:
-                        f_str = ''.join('1' if x else '0' for x in fs)
-                        sys.stdout.write(
-                            f'\r  [{f_str}] {gesture:<16}  '
-                            f'{pending.get(gesture,0)}/{CONFIRM_FRAMES} frames  ')
-                        sys.stdout.flush()
-
     except KeyboardInterrupt:
         print('\nInterrupted.')
     except Exception as e:
-        print(f'\nERROR during detection: {e}')
+        print(f'\nERROR: {e}')
         raise
     finally:
         cap.release()
@@ -304,19 +442,19 @@ def run_test(show_ui: bool = True) -> None:
         except Exception:
             pass
 
-    # ── Session summary ────────────────────────────────────────────────────────
+    # ── Summary ────────────────────────────────────────────────────────────────
     print('\n\nSession Summary')
     print('-' * 40)
     if action_log:
         counts = Counter()
         for entry in action_log:
-            parts = entry.split('  ')
+            parts = entry.split(' ')
             if len(parts) >= 3:
-                counts[parts[2]] += 1
+                counts[' '.join(parts[2:])] += 1
         for action, n in counts.most_common():
             print(f'  {action:<26} ×{n}')
     else:
-        print('  No gestures triggered.')
+        print('  No gestures triggered this session.')
     print('-' * 40)
 
 
