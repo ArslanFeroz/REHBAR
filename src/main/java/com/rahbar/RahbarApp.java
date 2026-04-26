@@ -245,6 +245,14 @@ public class RahbarApp extends Application {
                             continue;
                         }
 
+                        // Gesture intents — no TTS, just UI action
+                        if (intent.startsWith("GESTURE_")) {
+                            handleGestureIntent(intent);
+                            Platform.runLater(() ->
+                                ArcReactorWidget.getInstance().setState(WidgetState.IDLE));
+                            continue;
+                        }
+
                         // Route command via backend
                         String result = cr.route(text, intent);
 
@@ -310,6 +318,25 @@ public class RahbarApp extends Application {
     // ─────────────────────────────────────────────────────────────────────────
     // Global hotkey (stub — wire JNativeHook here when ready)
     // ─────────────────────────────────────────────────────────────────────────
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Gesture intent handler (no TTS — gesture provides its own feedback)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private void handleGestureIntent(String intent) {
+        System.out.println("[RahbarApp] Gesture intent: " + intent);
+        switch (intent) {
+            case "GESTURE_TOGGLE_WIDGET" -> Platform.runLater(() -> {
+                ArcReactorWidget w = ArcReactorWidget.getInstance();
+                if (w.getState() == WidgetState.MINIMIZED) {
+                    w.setState(WidgetState.IDLE);
+                } else {
+                    w.setState(WidgetState.MINIMIZED);
+                }
+            });
+            default -> System.out.println("[RahbarApp] Unknown gesture intent: " + intent);
+        }
+    }
 
     private void registerGlobalHotkey() {
         // See RahbarApp original stub for full JNativeHook implementation guide.

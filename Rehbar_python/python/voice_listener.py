@@ -131,17 +131,26 @@ class VoiceListener:
         print('[VoiceFinal] Settings reloaded.')
 
     def listen(self):
+        # Cap dynamic threshold: if ambient-noise calibration drove it very high,
+        # the mic becomes deaf.  Clamp to a sensible maximum.
+        if self.recognizer.dynamic_energy_threshold:
+            self.recognizer.energy_threshold = min(
+                self.recognizer.energy_threshold, 600)
+
         with self.microphone as source:
             print('Listening...')
             try:
                 audio = self.recognizer.listen(
                     source,
                     timeout=5,
-                    phrase_time_limit=4.5
+                    phrase_time_limit=5,
                 )
 
                 if _is_online():
-                    text = self.recognizer.recognize_google(audio)
+                    # language='en-US' gives Google's STT a strong prior for
+                    # English — reduces misrecognised homophones / accent errors.
+                    text = self.recognizer.recognize_google(
+                        audio, language='en-US')
                     print(f'[Online] Heard: {text}')
                 elif VOSK_AVAILABLE:
                     text = self._vosk(audio)

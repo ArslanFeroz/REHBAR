@@ -33,6 +33,7 @@ from voice_listener import VoiceListener
 from tts_engine import TTSEngine
 from intent_classifier import IntentClassifier
 from chat_gemini import GeminiChat
+from gesture_controller import GestureController
 
 HOST = '127.0.0.1'
 PORT = 5000
@@ -52,6 +53,7 @@ _listen_event = threading.Event()
 # Global references so endpoints can update settings at runtime
 _listener_ref: 'VoiceListener | None' = None
 _tts_ref: 'TTSEngine | None' = None
+_gesture_ctrl: 'GestureController | None' = None
 
 app = Flask(__name__)
 
@@ -144,6 +146,30 @@ def settings_reload():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/gesture/start', methods=['POST'])
+def gesture_start():
+    global _gesture_ctrl
+    if _gesture_ctrl is None:
+        return jsonify({'error': 'Gesture controller not initialised'}), 503
+    if not _gesture_ctrl.is_running():
+        _gesture_ctrl.start()
+    return jsonify({'status': 'running'}), 200
+
+
+@app.route('/gesture/stop', methods=['POST'])
+def gesture_stop():
+    global _gesture_ctrl
+    if _gesture_ctrl and _gesture_ctrl.is_running():
+        _gesture_ctrl.stop()
+    return jsonify({'status': 'stopped'}), 200
+
+
+@app.route('/gesture/status', methods=['GET'])
+def gesture_status():
+    running = _gesture_ctrl.is_running() if _gesture_ctrl else False
+    return jsonify({'running': running}), 200
+
+
 def _strip_wake_word(text: str) -> str:
     text = re.sub(
         r'^\s*(rehbar|rabar|rebar|ribar|raybar|ray\s+bar|re\s+bar'
@@ -227,7 +253,7 @@ def tts_loop(tts: TTSEngine) -> None:
 
 
 def main():
-    global _listener_ref, _tts_ref
+    global _listener_ref, _tts_ref, _gesture_ctrl
 
     print('=' * 54)
     print(f'    Rehbar Python Bridge  --  PID {PROCESS_PID}')
@@ -273,6 +299,15 @@ def main():
     threading.Thread(
         target=tts_loop, args=(tts,),
         daemon=True, name='TTSOutput').start()
+
+    print('[Bridge] Initialising gesture controller...')
+    _gesture_ctrl = GestureController(
+        listen_event  = _listen_event,
+        tts_queue     = tts_queue,
+        command_queue = command_queue,
+        show_preview  = True,    # set False to hide the camera window
+    )
+    _gesture_ctrl.start()
 
     _set_ready()
     print('[Bridge] All systems ready  --  /health -> 200')
