@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.chart.*?>
+<?import javafx.scene.canvas.*?>
+<?import javafx.geometry.Insets?>
+
+<VBox
+    xmlns:fx="http://javafx.com/fxml"
+    fx:controller="com.rahbar.ui.panels.DashboardController"
+    spacing="0"
+    style="-fx-background-color: transparent;">
+
+    <!-- Greeting header -->
+    <VBox spacing="4" style="-fx-padding: 0 0 20 0;">
+        <Label fx:id="greetingLabel" text="Good morning."
+               styleClass="page-title"/>
+        <Label fx:id="greetingSubLabel" text="Live overview of your assistant"
+               styleClass="page-subtitle"/>
+    </VBox>
+
+    <Region style="-fx-pref-height: 10px;"/>
+
+    <!-- Live status banner -->
+    <HBox fx:id="statusBanner" styleClass="card" spacing="16" alignment="CENTER_LEFT"
+          style="-fx-padding: 14 18 14 18; -fx-margin: 0 0 0 0;">
+        <Label fx:id="statusIcon" text="◉" style="-fx-font-size: 20px; -fx-text-fill: #2ECC71;"/>
+        <VBox spacing="3">
+            <Label fx:id="statusTitle" text="R.A.H.B.A.R is Active"
+                   style="-fx-text-fill: -color-text-primary; -fx-font-size: 14px; -fx-font-weight: bold;"/>
+            <Label fx:id="statusDesc" text="Listening for wake word: 'RAHBAR guide me'"
+                   styleClass="card-body"/>
+        </VBox>
+        <Region HBox.hgrow="ALWAYS"/>
+        <Label fx:id="statusBadge" text="IDLE" styleClass="badge, badge-success"/>
+    </HBox>
+
+    <Region style="-fx-pref-height: 18px;"/>
+
+    <!-- Stat cards -->
+    <HBox spacing="12">
+
+        <VBox styleClass="card" spacing="5" HBox.hgrow="ALWAYS" alignment="TOP_LEFT">
+            <Label text="COMMANDS TODAY" styleClass="form-label"/>
+            <Label fx:id="statCommandsToday" text="—"
+                   style="-fx-text-fill: -color-accent; -fx-font-size: 26px; -fx-font-weight: bold;"/>
+            <Label fx:id="statCommandsChange" text="Loading..." styleClass="card-body"/>
+        </VBox>
+
+        <VBox styleClass="card" spacing="5" HBox.hgrow="ALWAYS" alignment="TOP_LEFT">
+            <Label text="ACTIVE ALARMS" styleClass="form-label"/>
+            <Label fx:id="statAlarms" text="—"
+                   style="-fx-text-fill: -color-accent; -fx-font-size: 26px; -fx-font-weight: bold;"/>
+            <Label fx:id="statAlarmsNext" text="Loading..." styleClass="card-body"/>
+        </VBox>
+
+        <VBox styleClass="card" spacing="5" HBox.hgrow="ALWAYS" alignment="TOP_LEFT">
+            <Label text="APPS REGISTERED" styleClass="form-label"/>
+            <Label fx:id="statApps" text="—"
+                   style="-fx-text-fill: -color-accent; -fx-font-size: 26px; -fx-font-weight: bold;"/>
+            <Label text="In your app registry" styleClass="card-body"/>
+        </VBox>
+
+        <VBox styleClass="card" spacing="5" HBox.hgrow="ALWAYS" alignment="TOP_LEFT">
+            <Label text="SUCCESS RATE" styleClass="form-label"/>
+            <Label fx:id="statSuccessRate" text="—"
+                   style="-fx-text-fill: -color-accent; -fx-font-size: 26px; -fx-font-weight: bold;"/>
+            <Label text="Last 50 commands" styleClass="card-body"/>
+        </VBox>
+
+    </HBox>
+
+    <Region style="-fx-pref-height: 16px;"/>
+
+    <!-- Activity chart + Recent commands -->
+    <HBox spacing="12" VBox.vgrow="ALWAYS">
+
+        <!-- Activity bar chart -->
+        <VBox styleClass="card" spacing="10" style="-fx-pref-width: 340px; -fx-min-width: 280px;">
+            <HBox alignment="CENTER_LEFT">
+                <Label text="ACTIVITY" styleClass="form-label" HBox.hgrow="ALWAYS"/>
+                <Label fx:id="chartPeriodLabel" text="TODAY BY HOUR"
+                       styleClass="topbar-path-root"/>
+            </HBox>
+            <BarChart fx:id="activityChart"
+                      legendVisible="false"
+                      animated="false"
+                      style="-fx-background-color: transparent; -fx-pref-height: 170px;">
+                <xAxis>
+                    <CategoryAxis fx:id="chartXAxis"
+                                  label=""
+                                  style="-fx-tick-label-fill: -color-text-muted;
+                                         -fx-font-size: 9px;"/>
+                </xAxis>
+                <yAxis>
+                    <NumberAxis fx:id="chartYAxis"
+                                label=""
+                                minorTickVisible="false"
+                                style="-fx-tick-label-fill: -color-text-muted;
+                                       -fx-font-size: 9px;"/>
+                </yAxis>
+            </BarChart>
+        </VBox>
+
+        <!-- Recent commands -->
+        <VBox spacing="10" HBox.hgrow="ALWAYS" VBox.vgrow="ALWAYS">
+            <HBox alignment="CENTER_LEFT" spacing="10">
+                <Label text="RECENT COMMANDS" styleClass="form-label" HBox.hgrow="ALWAYS"/>
+                <Button text="View All" styleClass="btn-secondary"
+                        onAction="#onViewAllHistory"
+                        style="-fx-padding: 4 12 4 12; -fx-font-size: 11px;"/>
+            </HBox>
+
+            <TableView fx:id="recentCommandsTable" VBox.vgrow="ALWAYS"
+                       style="-fx-pref-height: 200px;">
+                <columns>
+                    <TableColumn fx:id="colCmd"    text="COMMAND" prefWidth="220"/>
+                    <TableColumn fx:id="colType"   text="TYPE"    prefWidth="100"/>
+                    <TableColumn fx:id="colStatus" text="STATUS"  prefWidth="80"/>
+                    <TableColumn fx:id="colTime"   text="TIME"    prefWidth="120"/>
+                </columns>
+                <placeholder>
+                    <Label text="No commands yet — try saying 'RAHBAR guide me'"
+                           styleClass="card-body"/>
+                </placeholder>
+            </TableView>
+        </VBox>
+
+    </HBox>
+
+</VBox>

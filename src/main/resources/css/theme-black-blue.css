@@ -1,0 +1,41 @@
+.root {
+    /* Base backgrounds  */
+    -color-bg-deep:           #000000;
+    -color-bg-base:           #050508;
+    -color-bg-sidebar:        #000000;
+    -color-bg-card:           #0A0A14;
+    -color-bg-card-hover:     #101020;
+    -color-bg-input:          #08080F;
+    -color-bg-header:         #030308;
+
+    /*Primary  */
+    -color-accent:            #3D7EFF;
+    -color-accent-bright:     #6B9FFF;
+    -color-accent-dim:        #1A4FCC;
+    -color-accent-glow:       #0A1A40;
+
+    /* Text */
+    -color-text-primary:      #E0E8FF;
+    -color-text-secondary:    #7A9FE0;
+    -color-text-muted:        #3A4F6A;
+    -color-text-accent:       #3D7EFF;
+
+    /* Status */
+    -color-success:           #2ECC71;
+    -color-warning:           #F39C12;
+    -color-error:             #FF3B3B;
+    -color-info:              #3D7EFF;
+
+    /* Borders & dividers */
+    -color-border:            #0A1A40;
+    -color-border-bright:     #1A3A80;
+    -color-divider:           #050F20;
+
+    /*scroller*/
+    -color-scrollbar-track:   #030308;
+    -color-scrollbar-thumb:   #1A4FCC;
+
+    /*nav active*/
+    -color-nav-active-bg:     #0A1530;
+    -color-nav-active-bar:    #3D7EFF;
+}

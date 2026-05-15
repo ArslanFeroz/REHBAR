@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.control.*?>
+<?import javafx.geometry.Insets?>
+
+<VBox
+    xmlns:fx="http://javafx.com/fxml"
+    fx:controller="com.rahbar.ui.panels.RegistryController"
+    spacing="0"
+    style="-fx-background-color: transparent;">
+
+    <!-- Page header -->
+    <VBox spacing="4" style="-fx-padding: 0 0 24 0;">
+        <Label text="App &amp; Website Registry" styleClass="page-title"/>
+        <Label text="Manage the voice aliases RAHBAR uses to open apps and websites"
+               styleClass="page-subtitle"/>
+    </VBox>
+
+    <!-- Tab pane -->
+    <TabPane fx:id="tabPane" VBox.vgrow="ALWAYS" tabClosingPolicy="UNAVAILABLE"
+             style="-fx-background-color: transparent; -fx-tab-min-width: 140px;">
+
+        <!-- App Registry -->
+        <Tab text="Applications">
+            <VBox spacing="16" style="-fx-padding: 20 0 0 0;">
+
+                <!-- Add new app row -->
+                <VBox styleClass="card" spacing="14">
+                    <Label text="ADD APPLICATION" styleClass="form-label"/>
+                    <HBox spacing="12" alignment="CENTER_LEFT">
+                        <VBox spacing="4" HBox.hgrow="ALWAYS">
+                            <Label text="Voice Alias" styleClass="form-label"/>
+                            <TextField fx:id="appAlias" promptText="e.g. chrome, spotify, notepad"/>
+                        </VBox>
+                        <VBox spacing="4" HBox.hgrow="ALWAYS">
+                            <Label text="Executable Path" styleClass="form-label"/>
+                            <HBox spacing="8">
+                                <TextField fx:id="appPath"
+                                           promptText="C:\Program Files\..."
+                                           HBox.hgrow="ALWAYS"/>
+                                <Button text="Browse" styleClass="btn-secondary"
+                                        onAction="#onBrowseApp"
+                                        style="-fx-padding: 8 12 8 12;"/>
+                            </HBox>
+                        </VBox>
+                        <VBox alignment="BOTTOM_LEFT" style="-fx-padding: 0 0 0 0;">
+                            <Button text="Add App" styleClass="btn-primary"
+                                    onAction="#onAddApp"
+                                    style="-fx-padding: 9 16 9 16; -fx-margin: 20 0 0 0;"/>
+                        </VBox>
+                    </HBox>
+                    <Label fx:id="appFeedback" text="" visible="false"
+                           style="-fx-font-size: 12px;"/>
+                </VBox>
+
+                <!-- App list table -->
+                <TableView fx:id="appTable" VBox.vgrow="ALWAYS">
+                    <columns>
+                        <TableColumn fx:id="colAppAlias" text="VOICE ALIAS"    prefWidth="200"/>
+                        <TableColumn fx:id="colAppPath"  text="EXECUTABLE PATH" prefWidth="440"/>
+                        <TableColumn fx:id="colAppAction" text=""               prefWidth="80"/>
+                    </columns>
+                    <placeholder>
+                        <Label text="No apps registered yet. Add one above."
+                               styleClass="card-body"/>
+                    </placeholder>
+                </TableView>
+
+                <Label fx:id="appCountLabel" text="0 apps" styleClass="card-body"/>
+            </VBox>
+        </Tab>
+
+        <!-- Website Registry -->
+        <Tab text="Websites">
+            <VBox spacing="16" style="-fx-padding: 20 0 0 0;">
+
+                <!-- Add new website row -->
+                <VBox styleClass="card" spacing="14">
+                    <Label text="ADD WEBSITE" styleClass="form-label"/>
+                    <HBox spacing="12" alignment="CENTER_LEFT">
+                        <VBox spacing="4" HBox.hgrow="ALWAYS">
+                            <Label text="Voice Alias" styleClass="form-label"/>
+                            <TextField fx:id="webAlias"
+                                       promptText="e.g. youtube, github, gmail"/>
+                        </VBox>
+                        <VBox spacing="4" HBox.hgrow="ALWAYS">
+                            <Label text="URL" styleClass="form-label"/>
+                            <TextField fx:id="webUrl"
+                                       promptText="https://youtube.com"/>
+                        </VBox>
+                        <VBox alignment="BOTTOM_LEFT">
+                            <Button text="Add Site" styleClass="btn-primary"
+                                    onAction="#onAddWebsite"
+                                    style="-fx-padding: 9 16 9 16;"/>
+                        </VBox>
+                    </HBox>
+                    <Label fx:id="webFeedback" text="" visible="false"
+                           style="-fx-font-size: 12px;"/>
+                </VBox>
+
+                <!-- Website list table -->
+                <TableView fx:id="webTable" VBox.vgrow="ALWAYS">
+                    <columns>
+                        <TableColumn fx:id="colWebAlias"  text="VOICE ALIAS" prefWidth="200"/>
+                        <TableColumn fx:id="colWebUrl"    text="URL"          prefWidth="440"/>
+                        <TableColumn fx:id="colWebAction" text=""             prefWidth="80"/>
+                    </columns>
+                    <placeholder>
+                        <Label text="No websites registered yet. Add one above."
+                               styleClass="card-body"/>
+                    </placeholder>
+                </TableView>
+
+                <Label fx:id="webCountLabel" text="0 websites" styleClass="card-body"/>
+            </VBox>
+        </Tab>
+
+    </TabPane>
+
+</VBox>

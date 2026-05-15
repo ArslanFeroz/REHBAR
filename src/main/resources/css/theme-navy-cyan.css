@@ -1,0 +1,41 @@
+.root {
+    /* Base backgrounds */
+    -color-bg-deep:           #020124;
+    -color-bg-base:           #03045E;
+    -color-bg-sidebar:        #010118;
+    -color-bg-card:           #050A6B;
+    -color-bg-card-hover:     #071080;
+    -color-bg-input:          #030860;
+    -color-bg-header:         #020135;
+
+    /* Primary accent (cyan) */
+    -color-accent:            #00B4D8;
+    -color-accent-bright:     #48CAE4;
+    -color-accent-dim:        #0077B6;
+    -color-accent-glow:       #003D4D;
+
+    /* Text */
+    -color-text-primary:      #E8F4F8;
+    -color-text-secondary:    #90E0EF;
+    -color-text-muted:        #4A7A8A;
+    -color-text-accent:       #00B4D8;
+
+    /* Status colors */
+    -color-success:           #2ECC71;
+    -color-warning:           #F39C12;
+    -color-error:             #E74C3C;
+    -color-info:              #00B4D8;
+
+    /* Borders & dividers */
+    -color-border:            #003D4D;
+    -color-border-bright:     #006080;
+    -color-divider:           #002030;
+
+    /* Scrollbar */
+    -color-scrollbar-track:   #020135;
+    -color-scrollbar-thumb:   #0077B6;
+
+    /* Nav active indicator */
+    -color-nav-active-bg:     #001D2A;
+    -color-nav-active-bar:    #00B4D8;
+}

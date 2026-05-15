@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.control.*?>
+<?import javafx.geometry.Insets?>
+
+<VBox
+    xmlns:fx="http://javafx.com/fxml"
+    fx:controller="com.rahbar.ui.panels.SettingsController"
+    spacing="0"
+    style="-fx-background-color: transparent;">
+
+    <VBox spacing="4" style="-fx-padding: 0 0 24 0;">
+        <Label text="Voice &amp; Settings" styleClass="page-title"/>
+        <Label text="Configure your assistant's voice, AI, appearance and shortcuts"
+               styleClass="page-subtitle"/>
+    </VBox>
+
+    <ScrollPane fitToWidth="true" VBox.vgrow="ALWAYS"
+                style="-fx-background: transparent; -fx-background-color: transparent;">
+        <VBox spacing="20">
+
+            <!-- Voice Input -->
+            <VBox styleClass="card" spacing="18">
+                <Label text="VOICE INPUT" styleClass="form-label"/>
+                <VBox spacing="8">
+                    <HBox alignment="CENTER_LEFT">
+                        <Label text="Microphone Sensitivity" styleClass="card-title" HBox.hgrow="ALWAYS"/>
+                        <Label fx:id="sensitivityValue" text="300" styleClass="badge badge-info"/>
+                    </HBox>
+                    <Slider fx:id="sliderSensitivity" min="100" max="1000" value="300"/>
+                    <Label text="Higher = more sensitive. Lower = ignores background noise."
+                           styleClass="card-body"/>
+                </VBox>
+                <Region styleClass="section-divider"/>
+                <VBox spacing="8">
+                    <HBox alignment="CENTER_LEFT">
+                        <Label text="Pause Threshold (seconds)" styleClass="card-title" HBox.hgrow="ALWAYS"/>
+                        <Label fx:id="pauseValue" text="0.8s" styleClass="badge badge-info"/>
+                    </HBox>
+                    <Slider fx:id="sliderPause" min="0.3" max="2.0" value="0.8"/>
+                    <Label text="How long R.A.H.B.A.R waits after you stop speaking before processing."
+                           styleClass="card-body"/>
+                </VBox>
+            </VBox>
+
+            <!-- Text to Speech -->
+            <VBox styleClass="card" spacing="18">
+                <Label text="TEXT TO SPEECH" styleClass="form-label"/>
+                <VBox spacing="6">
+                    <Label text="Voice" styleClass="card-title"/>
+                    <HBox spacing="12" alignment="CENTER_LEFT">
+                        <ComboBox fx:id="comboVoice" HBox.hgrow="ALWAYS" promptText="Loading voices..."/>
+                        <Button text="Preview" styleClass="btn-secondary"
+                                onAction="#onPreviewVoice" style="-fx-padding: 8 16 8 16;"/>
+                    </HBox>
+                </VBox>
+                <Region styleClass="section-divider"/>
+                <VBox spacing="8">
+                    <HBox alignment="CENTER_LEFT">
+                        <Label text="Speech Rate (words per minute)" styleClass="card-title" HBox.hgrow="ALWAYS"/>
+                        <Label fx:id="rateValue" text="175 wpm" styleClass="badge badge-info"/>
+                    </HBox>
+                    <Slider fx:id="sliderRate" min="100" max="300" value="175"/>
+                </VBox>
+                <Region styleClass="section-divider"/>
+                <VBox spacing="8">
+                    <HBox alignment="CENTER_LEFT">
+                        <Label text="Volume" styleClass="card-title" HBox.hgrow="ALWAYS"/>
+                        <Label fx:id="volumeValue" text="90%" styleClass="badge badge-info"/>
+                    </HBox>
+                    <Slider fx:id="sliderVolume" min="0" max="100" value="90"/>
+                </VBox>
+            </VBox>
+
+            <!-- Camera Gestures -->
+            <VBox styleClass="card" spacing="16">
+                <Label text="CAMERA GESTURES" styleClass="form-label"/>
+                <HBox alignment="CENTER_LEFT" spacing="12">
+                    <VBox spacing="3" HBox.hgrow="ALWAYS">
+                        <Label text="Enable Gesture Control" styleClass="card-title"/>
+                        <Label text="Opens the camera for hand gesture recognition. Disabled on every launch for privacy."
+                               styleClass="card-body"/>
+                    </VBox>
+                    <CheckBox fx:id="checkGesturesEnabled"/>
+                </HBox>
+                <Region styleClass="section-divider"/>
+                <VBox spacing="4">
+                    <Label text="Available gestures:" styleClass="card-title"/>
+                    <Label text="Open Palm — Screenshot   |   Thumbs Up — Volume Up   |   Fist — Volume Down"
+                           styleClass="card-body"/>
+                    <Label text="Pinch Open — Zoom In   |   Pinch Close — Zoom Out   |   Swipe — Switch Tab"
+                           styleClass="card-body"/>
+                    <Label text="Voice command: say Enable Gestures or Disable Gestures"
+                           styleClass="card-body" style="-fx-font-style: italic;"/>
+                </VBox>
+            </VBox>
+
+            <!-- Color Theme -->
+            <VBox styleClass="card" spacing="16">
+                <VBox spacing="3">
+                    <Label text="COLOR THEME" styleClass="form-label"/>
+                    <Label text="Choose your preferred color palette. Changes apply instantly."
+                           styleClass="card-body"/>
+                </VBox>
+                <HBox spacing="12" fx:id="themeCardRow">
+                    <VBox fx:id="themeCardNavy" styleClass="theme-card, theme-card-active"
+                          spacing="10" alignment="TOP_LEFT"
+                          onMouseClicked="#onSelectThemeNavyCyan">
+                        <HBox spacing="4">
+                            <Region style="-fx-background-color: #03045E; -fx-pref-width: 18px; -fx-pref-height: 18px; -fx-background-radius: 3px;"/>
+                            <Region style="-fx-background-color: #00B4D8; -fx-pref-width: 18px; -fx-pref-height: 18px; -fx-background-radius: 3px;"/>
+                            <Region style="-fx-background-color: #90E0EF; -fx-pref-width: 18px; -fx-pref-height: 18px; -fx-background-radius: 3px;"/>
+                        </HBox>
+                        <Label text="Navy + Cyan" styleClass="theme-card-name"/>
+                        <Label text="Jarvis classic" styleClass="theme-card-desc"/>
+                    </VBox>
+                    <VBox fx:id="themeCardBlack" styleClass="theme-card"
+                          spacing="10" alignment="TOP_LEFT"
+                          onMouseClicked="#onSelectThemeBlackBlue">
+                        <HBox spacing="4">
+                            <Region style="-fx-background-color: #000000; -fx-pref-width: 18px; -fx-pref-height: 18px; -fx-background-radius: 3px;"/>
+                            <Region style="-fx-background-color: #3D7EFF; -fx-pref-width: 18px; -fx-pref-height: 18px; -fx-background-radius: 3px;"/>
+                            <Region style="-fx-background-color: #6B9FFF; -fx-pref-width: 18px; -fx-pref-height: 18px; -fx-background-radius: 3px;"/>
+                        </HBox>
+                        <Label text="Black + Blue" styleClass="theme-card-name"/>
+                        <Label text="Dark sci-fi" styleClass="theme-card-desc"/>
+                    </VBox>
+                    <VBox fx:id="themeCardGreen" styleClass="theme-card"
+                          spacing="10" alignment="TOP_LEFT"
+                          onMouseClicked="#onSelectThemeCharcoalGreen">
+                        <HBox spacing="4">
+                            <Region style="-fx-background-color: #111411; -fx-pref-width: 18px; -fx-pref-height: 18px; -fx-background-radius: 3px;"/>
+                            <Region style="-fx-background-color: #39FF14; -fx-pref-width: 18px; -fx-pref-height: 18px; -fx-background-radius: 3px;"/>
+                            <Region style="-fx-background-color: #7FFF5F; -fx-pref-width: 18px; -fx-pref-height: 18px; -fx-background-radius: 3px;"/>
+                        </HBox>
+                        <Label text="Charcoal + Green" styleClass="theme-card-name"/>
+                        <Label text="Terminal hacker" styleClass="theme-card-desc"/>
+                    </VBox>
+                    <VBox fx:id="themeCardPurple" styleClass="theme-card"
+                          spacing="10" alignment="TOP_LEFT"
+                          onMouseClicked="#onSelectThemePurpleGold">
+                        <HBox spacing="4">
+                            <Region style="-fx-background-color: #0E0620; -fx-pref-width: 18px; -fx-pref-height: 18px; -fx-background-radius: 3px;"/>
+                            <Region style="-fx-background-color: #FFD700; -fx-pref-width: 18px; -fx-pref-height: 18px; -fx-background-radius: 3px;"/>
+                            <Region style="-fx-background-color: #FFE84D; -fx-pref-width: 18px; -fx-pref-height: 18px; -fx-background-radius: 3px;"/>
+                        </HBox>
+                        <Label text="Purple + Gold" styleClass="theme-card-name"/>
+                        <Label text="Premium luxury" styleClass="theme-card-desc"/>
+                    </VBox>
+
+                    <!-- White + Black -->
+                    <VBox fx:id="themeCardWhite" styleClass="theme-card"
+                          spacing="10" alignment="TOP_LEFT"
+                          onMouseClicked="#onSelectThemeWhiteBlack">
+                        <HBox spacing="4">
+                            <Region style="-fx-background-color: #1A1A1A; -fx-pref-width: 18px; -fx-pref-height: 18px; -fx-background-radius: 3px;"/>
+                            <Region style="-fx-background-color: #FFFFFF; -fx-pref-width: 18px; -fx-pref-height: 18px; -fx-background-radius: 3px; -fx-border-color: #DDDDDA; -fx-border-width: 1px;"/>
+                            <Region style="-fx-background-color: #F5F5F3; -fx-pref-width: 18px; -fx-pref-height: 18px; -fx-background-radius: 3px; -fx-border-color: #DDDDDA; -fx-border-width: 1px;"/>
+                        </HBox>
+                        <Label text="White + Black" styleClass="theme-card-name"/>
+                        <Label text="Editorial professional" styleClass="theme-card-desc"/>
+                    </VBox>
+                </HBox>
+            </VBox>
+
+            <!-- Keyboard shortcut -->
+            <VBox styleClass="card" spacing="16">
+                <VBox spacing="3">
+                    <Label text="KEYBOARD SHORTCUT" styleClass="form-label"/>
+                    <Label text="Global hotkey to activate R.A.H.B.A.R listening from anywhere — even when minimized."
+                           styleClass="card-body"/>
+                </VBox>
+
+                <HBox alignment="CENTER_LEFT" spacing="12">
+                    <VBox spacing="3" HBox.hgrow="ALWAYS">
+                        <Label text="Enable Global Hotkey" styleClass="card-title"/>
+                        <Label text="Requires JNativeHook library (see pom.xml). Works system-wide."
+                               styleClass="card-body"/>
+                    </VBox>
+                    <CheckBox fx:id="checkHotkeyEnabled" selected="true"/>
+                </HBox>
+
+                <Region styleClass="section-divider"/>
+
+                <!-- Hotkey picker row -->
+                <VBox spacing="10">
+                    <Label text="Hotkey Combination" styleClass="card-title"/>
+                    <HBox spacing="10" alignment="CENTER_LEFT">
+
+                        <!-- Modifier checkboxes -->
+                        <CheckBox fx:id="checkHotkeyCtrl"  text="Ctrl"  selected="true"/>
+                        <CheckBox fx:id="checkHotkeyShift" text="Shift" selected="true"/>
+                        <CheckBox fx:id="checkHotkeyAlt"   text="Alt"   selected="false"/>
+
+                        <!-- Key field -->
+                        <Label text="+" styleClass="card-body"/>
+                        <TextField fx:id="fieldHotkeyKey"
+                                   text="R"
+                                   promptText="Key"
+                                   style="-fx-pref-width: 48px; -fx-max-width: 48px;
+                                          -fx-alignment: CENTER; -fx-font-weight: bold;"/>
+
+                        <Region HBox.hgrow="ALWAYS"/>
+
+                        <!-- Live preview -->
+                        <Label fx:id="hotkeyPreviewLabel"
+                               text="Ctrl + Shift + R"
+                               styleClass="badge, badge-info"/>
+                    </HBox>
+                    <Label text="Type a single letter or digit in the key field. Changes take effect after saving."
+                           styleClass="card-body"/>
+                </VBox>
+            </VBox>
+
+            <!-- Save button -->
+            <HBox alignment="CENTER_RIGHT" spacing="12">
+                <Label fx:id="settingsFeedback" text="" visible="false"
+                       style="-fx-font-size: 12px;"/>
+                <Button text="Save Settings" styleClass="btn-primary"
+                        onAction="#onSaveSettings"/>
+            </HBox>
+
+            <Region style="-fx-pref-height: 20px;"/>
+        </VBox>
+    </ScrollPane>
+
+</VBox>
